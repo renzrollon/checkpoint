@@ -145,17 +145,19 @@ async function readSpecs(host: GitHost, dir: string, ref: string, prefix = "", d
     if (isHostError(e) && e.kind === "not_found") return [];
     throw e;
   }
-  const out: SpecFile[] = [];
-  for (const entry of entries) {
-    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.type === "dir") {
-      out.push(...(await readSpecs(host, `${dir}/${entry.name}`, ref, rel, depth + 1)));
-    } else if (entry.name.endsWith(".md")) {
+  // Every sibling at this level is started before any of them resolves, so a
+  // change's specs cost one round trip per directory level, not one per file
+  // (design D4). The sort below makes the output independent of arrival order.
+  const nested = await Promise.all(
+    entries.map(async (entry): Promise<SpecFile[]> => {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.type === "dir") return readSpecs(host, `${dir}/${entry.name}`, ref, rel, depth + 1);
+      if (!entry.name.endsWith(".md")) return [];
       const read = await host.readFile(`${dir}/${entry.name}`, ref);
-      out.push({ path: rel, text: read.text });
-    }
-  }
-  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      return [{ path: rel, text: read.text }];
+    }),
+  );
+  return nested.flat().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 interface ChangeCore {
@@ -223,18 +225,31 @@ export async function loadChange(host: GitHost, ref: string | null | undefined, 
   const info = await host.resolveRef(ref);
   if (!CHANGE_NAME.test(name) || name === "archive") return { kind: "not_found", name, ref: info.ref };
   const dir = `${CHANGES_DIR}/${name}`;
-  try {
-    await host.listDir(dir, info.ref);
-  } catch (e) {
-    if (isHostError(e) && e.kind === "not_found") return { kind: "not_found", name, ref: info.ref };
-    throw e;
-  }
 
-  const [proposal, core, specs] = await Promise.all([
+  // The existence check runs alongside the reads rather than before them
+  // (design D4): a missing change makes every read resolve to "missing"
+  // anyway, so nothing is wasted, and a present one costs one round trip
+  // fewer. Resolution order is fixed here so the thrown error never depends
+  // on which call happened to fail first.
+  const [exists, proposalRead, coreRead, specsRead] = await Promise.allSettled([
+    host.listDir(dir, info.ref),
     readOptional(host, `${dir}/proposal.md`, info.ref),
     readCore(host, info.ref, name),
     readSpecs(host, `${dir}/specs`, info.ref),
   ]);
+
+  if (exists.status === "rejected") {
+    const e: unknown = exists.reason;
+    if (isHostError(e) && e.kind === "not_found") return { kind: "not_found", name, ref: info.ref };
+    throw e;
+  }
+  // Declaration order, so two simultaneous failures always surface the same one.
+  if (proposalRead.status === "rejected") throw proposalRead.reason;
+  if (coreRead.status === "rejected") throw coreRead.reason;
+  if (specsRead.status === "rejected") throw specsRead.reason;
+  const proposal = proposalRead.value;
+  const core = coreRead.value;
+  const specs = specsRead.value;
 
   return {
     kind: "change",

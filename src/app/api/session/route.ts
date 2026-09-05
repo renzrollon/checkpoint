@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { redirectToPath } from "@/lib/auth/redirect";
 import {
   NO_KEY_MESSAGE,
   SESSION_COOKIE,
@@ -48,8 +49,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const session = makeSession(configured);
-  const destination = new URL(safeNextPath(next ?? request.nextUrl.searchParams.get("next")), request.url);
-  const response = NextResponse.redirect(destination, 303);
+  const destination = safeNextPath(next ?? request.nextUrl.searchParams.get("next"));
+  const response = redirectToPath(destination, 303);
   response.cookies.set({
     name: SESSION_COOKIE,
     value: session.value,

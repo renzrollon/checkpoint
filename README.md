@@ -31,6 +31,7 @@ still have to land in specflow, see `docs/how-checkpoint-works.md`.
 | `CHECKPOINT_REPO` | with `github` | `owner/name` of the one repository the app reads and writes. |
 | `CHECKPOINT_GITHUB_TOKEN` | with `github` | Fine-grained personal access token for that repository (scope below). Never logged, never included in an error message. |
 | `CHECKPOINT_FIXTURE_DIR` | with `fixture` | Directory served as the repository. Defaults to `fixtures/repo`. |
+| `CHECKPOINT_DEV_ORIGINS` | no, development only | Comma-separated extra origins `npm run dev` may serve `_next/*` to, so a phone on the LAN can load the app ("Testing from your phone" below). `127.0.0.1` is always allowed. Read once at dev-server startup; `next start` and Vercel ignore it. |
 
 Copy `.env.example` to `.env.local` and fill it in. Validation runs on first
 use and stops the request naming the missing variable.
@@ -89,6 +90,48 @@ head SHA the page was rendered from.
 | `npm test` | Unit and component tests (Vitest, jsdom) |
 | `npm run test:e2e` | Playwright smoke on the fixture adapter at 375 px |
 | `npm run gen:ledger-fixtures` | Regenerate the ledger golden files (below) |
+
+## Testing from your phone
+
+Checkpoint is built for a 375 px screen, so it is worth opening on a real one
+before deploying. The redirects it issues carry a relative `Location`, so
+sign-in works at whatever address the phone used; the only thing that needs
+configuring is which origins the development server will serve assets to.
+
+**On the same Wi-Fi, against the development server.** Find this Mac's address
+and start the server bound to every interface:
+
+```sh
+ipconfig getifaddr en0            # e.g. 192.168.7.42
+CHECKPOINT_DEV_ORIGINS=192.168.7.42 \
+CHECKPOINT_GIT_HOST=fixture CHECKPOINT_ACCESS_KEY=dev \
+npm run dev -- -H 0.0.0.0
+```
+
+Open `http://192.168.7.42:3000` on the phone and sign in with the access key.
+The GitHub variables from "Running locally" work here too; only
+`CHECKPOINT_DEV_ORIGINS` and `-H 0.0.0.0` are extra. Without the variable Next
+answers `403 Blocked cross-origin request` for every `_next/*` asset from any
+origin but `127.0.0.1`. It is read once at startup, so **restart `npm run dev`
+after changing it**.
+
+**Over an https tunnel, against the production build.** No origin allowlist is
+involved; the tunnel terminates https and forwards to `localhost:3000`:
+
+```sh
+npm run build && npm start
+# then point any https tunnel (cloudflared, ngrok, tailscale funnel) at localhost:3000
+```
+
+**Deployed.** See "Deploying to Vercel" below; the same phone flow applies with
+none of this setup.
+
+> **Why the LAN path uses the development server.** In production, and on any
+> request that arrived over https, the session cookie carries `Secure`, so a
+> browser will not store it over plain http. A production build reached at
+> `http://192.168.7.42:3000` therefore accepts the key and then bounces back to
+> the login page. The development server omits `Secure` over plain http, which
+> is what lets the phone hold the session on a LAN.
 
 ## Deploying to Vercel
 

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { redirectToPath } from "@/lib/auth/redirect";
 import { NO_KEY_MESSAGE, SESSION_COOKIE, configuredKey, verifySession } from "@/lib/auth/session";
 
 /**
@@ -52,9 +53,10 @@ export function proxy(request: NextRequest): NextResponse {
   if (isWriteLike(request)) {
     response = NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   } else {
-    const login = new URL("/login", request.url);
-    login.searchParams.set("next", `${pathname}${search}`);
-    response = NextResponse.redirect(login);
+    // Relative, so the browser resolves it against the address it used rather
+    // than the address the server is bound to (design D1).
+    const query = new URLSearchParams({ next: `${pathname}${search}` });
+    response = redirectToPath(`/login?${query}`, 307);
   }
   response.headers.set("cache-control", "no-store");
   if (cookie !== undefined) response.cookies.delete(SESSION_COOKIE);

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { HostError, type GitHost } from "@/lib/githost";
 import { createFixtureHost } from "@/lib/githost/fixture";
 import { blockingReasonFor, listChanges, loadChange } from "./load";
 
@@ -21,6 +22,51 @@ function tempRepo(build: (changes: string) => void): string {
 afterEach(() => {
   for (const d of temps.splice(0)) rmSync(d, { recursive: true, force: true });
 });
+
+/**
+ * Wrap a host so each call's peak concurrency is recorded. `Promise.all`
+ * starts every sibling before any of them resolves, so a concurrent reader
+ * shows a peak of at least 2 deterministically; the sequential one never
+ * exceeds 1, whatever the adapter's timing.
+ */
+function countingHost(base: GitHost) {
+  const inFlight = { readFile: 0, listDir: 0 };
+  const peak = { readFile: 0, listDir: 0 };
+  function track<A extends unknown[], R>(name: "readFile" | "listDir", call: (...args: A) => Promise<R>) {
+    return async (...args: A): Promise<R> => {
+      inFlight[name] += 1;
+      peak[name] = Math.max(peak[name], inFlight[name]);
+      try {
+        return await call(...args);
+      } finally {
+        inFlight[name] -= 1;
+      }
+    };
+  }
+  const host: GitHost = {
+    ...base,
+    readFile: track("readFile", (path: string, ref: string) => base.readFile(path, ref)),
+    listDir: track("listDir", (path: string, ref: string) => base.listDir(path, ref)),
+  };
+  return { host, peak };
+}
+
+/** A host whose reads and listings each fail with a fixed error. */
+function failingHost(errors: { listDir: HostError; readFile: HostError }): GitHost {
+  return {
+    name: "failing",
+    resolveRef: async (ref) => ({ ref: ref ?? "main", headSha: "a".repeat(40) }),
+    readFile: async () => {
+      throw errors.readFile;
+    },
+    listDir: async () => {
+      throw errors.listDir;
+    },
+    writeFile: async () => {
+      throw errors.readFile;
+    },
+  };
+}
 
 const CLEAR_LEDGER = `# Decisions — x
 
@@ -183,6 +229,61 @@ describe("loadChange", () => {
     expect(c.ledger.summary.invalid).toBe(1);
     expect(c.ledger.rows[0].problems.join(" ")).toMatch(/design\.md is absent/);
     expect(c.ledger.blockingReason).toBe("1 ledger row is invalid; the laptop side would refuse this");
+  });
+
+  it("reads the specs concurrently and still returns them sorted", async () => {
+    const dir = tempRepo((changes) => {
+      const specs = join(changes, "wide", "specs");
+      mkdirSync(join(specs, "zzz-gate"), { recursive: true });
+      mkdirSync(join(specs, "aaa-inbox"), { recursive: true });
+      writeFileSync(join(changes, "wide", "proposal.md"), "## Why\n");
+      writeFileSync(join(specs, "zzz-gate", "spec.md"), "gate\n");
+      writeFileSync(join(specs, "aaa-inbox", "spec.md"), "inbox\n");
+      writeFileSync(join(specs, "aaa-inbox", "extra-spec.md"), "extra\n");
+    });
+    const counted = countingHost(createFixtureHost({ dir }));
+    const result = await loadChange(counted.host, "main", "wide");
+    if (result.kind !== "change") throw new Error("expected change");
+    expect(result.change.specs.map((s) => s.path)).toEqual([
+      "aaa-inbox/extra-spec.md",
+      "aaa-inbox/spec.md",
+      "zzz-gate/spec.md",
+    ]);
+    // Sequential reads never exceed one call in flight at a time.
+    expect(counted.peak.readFile).toBeGreaterThanOrEqual(2);
+    expect(counted.peak.listDir).toBeGreaterThanOrEqual(2);
+  });
+
+  it("an unknown change on the fixture is still a typed not_found, with no error escaping", async () => {
+    await expect(loadChange(host(), "main", "no-such-change")).resolves.toEqual({
+      kind: "not_found",
+      name: "no-such-change",
+      ref: "main",
+    });
+  });
+
+  it("the existence failure wins over a simultaneous read failure", async () => {
+    const failing = failingHost({
+      listDir: new HostError({ kind: "forbidden", message: "rate limited" }),
+      readFile: new HostError({ kind: "upstream", message: "git host unreachable" }),
+    });
+    await expect(loadChange(failing, "main", "add-user-auth")).rejects.toMatchObject({ kind: "forbidden" });
+  });
+
+  it("a read failure surfaces when the change exists", async () => {
+    const dir = tempRepo((changes) => {
+      mkdirSync(join(changes, "one", "specs", "gate"), { recursive: true });
+      writeFileSync(join(changes, "one", "specs", "gate", "spec.md"), "gate\n");
+    });
+    const base = createFixtureHost({ dir });
+    const broken: GitHost = {
+      ...base,
+      readFile: async (path, ref) => {
+        if (path.endsWith("/spec.md")) throw new HostError({ kind: "upstream", message: "git host unreachable", path });
+        return base.readFile(path, ref);
+      },
+    };
+    await expect(loadChange(broken, "main", "one")).rejects.toMatchObject({ kind: "upstream" });
   });
 
   it("reports an unreadable checkpoint.json as a problem, not as absent", async () => {

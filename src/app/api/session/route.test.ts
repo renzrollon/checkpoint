@@ -6,18 +6,40 @@ import { DELETE, POST } from "./route";
 
 const KEY = "the-access-key";
 const ORIGIN = "https://checkpoint.example";
+/** What Next reports as `request.url` when the server is bound to 0.0.0.0. */
+const BIND_ORIGIN = "http://0.0.0.0:3200";
+/** What it reports behind a tunnel that forwards to localhost. */
+const TUNNEL_BIND_ORIGIN = "http://localhost:3000";
+/** The address the phone actually used; Next does not derive the URL from it. */
+const PHONE_HOST = "192.168.7.42:3200";
 
-function post(body: Record<string, string>, query = "") {
+function post(
+  body: Record<string, string>,
+  init: { origin?: string; query?: string; headers?: Record<string, string> } = {},
+) {
   const form = new URLSearchParams(body);
-  return new NextRequest(`${ORIGIN}/api/session${query}`, {
+  const headers = new Headers({ "content-type": "application/x-www-form-urlencoded", ...(init.headers ?? {}) });
+  return new NextRequest(`${init.origin ?? ORIGIN}/api/session${init.query ?? ""}`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers,
     body: form.toString(),
   });
 }
 
+/** A request as it reaches a server bound to 0.0.0.0 from a phone on the LAN. */
+function fromPhone(body: Record<string, string>, extraHeaders: Record<string, string> = {}) {
+  return post(body, { origin: BIND_ORIGIN, headers: { host: PHONE_HOST, ...extraHeaders } });
+}
+
 function cookieAttrs(res: Response): string {
   return (res.headers.get("set-cookie") ?? "").toLowerCase();
+}
+
+/** A Location the browser resolves against its own origin: a path, never a URL. */
+function expectRelativeLocation(res: Response, expected: string) {
+  const location = res.headers.get("location");
+  expect(location).toBe(expected);
+  expect(location).not.toContain("://");
 }
 
 describe("POST /api/session", () => {
@@ -31,7 +53,7 @@ describe("POST /api/session", () => {
   it("the correct key issues a session and redirects to next", async () => {
     const res = await POST(post({ key: KEY, next: "/changes/add-user-auth" }));
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(`${ORIGIN}/changes/add-user-auth`);
+    expectRelativeLocation(res, "/changes/add-user-auth");
     const attrs = cookieAttrs(res);
     expect(attrs).toContain(`${SESSION_COOKIE}=v1.`);
     expect(attrs).toContain("httponly");
@@ -43,8 +65,62 @@ describe("POST /api/session", () => {
   });
 
   it("redirects to the inbox when next is absent or unsafe", async () => {
-    expect((await POST(post({ key: KEY }))).headers.get("location")).toBe(`${ORIGIN}/`);
-    expect((await POST(post({ key: KEY, next: "//evil.example" }))).headers.get("location")).toBe(`${ORIGIN}/`);
+    expectRelativeLocation(await POST(post({ key: KEY })), "/");
+    expectRelativeLocation(await POST(post({ key: KEY, next: "//evil.example" })), "/");
+    expectRelativeLocation(await POST(post({ key: KEY, next: "https://evil.example/x" })), "/");
+    expectRelativeLocation(await POST(post({ key: KEY, next: "/login" })), "/");
+  });
+
+  it("the redirect does not depend on how the server was addressed", async () => {
+    const cases: Array<[string | undefined, string]> = [
+      ["/changes/add-user-auth", "/changes/add-user-auth"],
+      ["/", "/"],
+      ["/changes/x", "/changes/x"],
+      ["//evil.example", "/"],
+      ["https://evil.example/x", "/"],
+      ["/login", "/"],
+      [undefined, "/"],
+    ];
+    for (const [next, expected] of cases) {
+      const res = await POST(fromPhone(next === undefined ? { key: KEY } : { key: KEY, next }));
+      expect(res.status, String(next)).toBe(303);
+      expectRelativeLocation(res, expected);
+      // The bind address the server sees must not leak into the header.
+      expect(res.headers.get("location")).not.toContain("0.0.0.0");
+      expect(res.headers.get("location")).not.toContain("localhost");
+      // The session is still issued on the very same response.
+      expect(verifySession(KEY, res.cookies.get(SESSION_COOKIE)?.value)).toBe("valid");
+    }
+  });
+
+  it("ignores a forwarding proxy's idea of the host and scheme", async () => {
+    const res = await POST(
+      fromPhone(
+        { key: KEY, next: "/changes/x" },
+        { "x-forwarded-proto": "https", "x-forwarded-host": "checkpoint.example.app" },
+      ),
+    );
+    expect(res.status).toBe(303);
+    expectRelativeLocation(res, "/changes/x");
+    expect(res.headers.get("location")).not.toContain("checkpoint.example.app");
+  });
+
+  it("stays relative behind a tunnel that reaches localhost", async () => {
+    const res = await POST(
+      post({ key: KEY, next: "/changes/x" }, { origin: TUNNEL_BIND_ORIGIN, headers: { host: PHONE_HOST } }),
+    );
+    expect(res.status).toBe(303);
+    expectRelativeLocation(res, "/changes/x");
+  });
+
+  it("the Secure attribute follows the transport, not the header", async () => {
+    expect(process.env.NODE_ENV).not.toBe("production");
+    const overHttp = await POST(fromPhone({ key: KEY, next: "/" }));
+    expect(cookieAttrs(overHttp)).toContain(`${SESSION_COOKIE}=v1.`);
+    expect(cookieAttrs(overHttp)).not.toContain("secure");
+
+    const overHttps = await POST(post({ key: KEY, next: "/" }));
+    expect(cookieAttrs(overHttps)).toContain("secure");
   });
 
   it("accepts JSON too", async () => {
@@ -56,6 +132,7 @@ describe("POST /api/session", () => {
       }),
     );
     expect(res.status).toBe(303);
+    expectRelativeLocation(res, "/x");
   });
 
   it("a wrong key is refused with 401 and no cookie", async () => {
