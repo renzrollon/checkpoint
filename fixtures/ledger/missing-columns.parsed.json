@@ -1,0 +1,166 @@
+{
+  "change": "missing-columns",
+  "parseable": true,
+  "rows": [
+    {
+      "id": "D1",
+      "question": "A row with four cells",
+      "class": "agent_resolved",
+      "resolution": "yes",
+      "evidence": "",
+      "line": 5,
+      "raw": "| D1 | A row with four cells | agent_resolved | yes |",
+      "valid": false,
+      "problems": [
+        "expected 5 columns (id, question, class, resolution, evidence), found 4",
+        "agent_resolved without evidence"
+      ]
+    },
+    {
+      "id": "D2",
+      "question": "A row with six cells",
+      "class": "agent_resolved",
+      "resolution": "yes",
+      "evidence": "docs/a.md",
+      "line": 6,
+      "raw": "| D2 | A row with six cells | agent_resolved | yes | docs/a.md | extra |",
+      "valid": false,
+      "problems": [
+        "expected 5 columns (id, question, class, resolution, evidence), found 6"
+      ]
+    },
+    {
+      "id": "D3",
+      "question": "A row that is fine",
+      "class": "agent_resolved",
+      "resolution": "yes",
+      "evidence": "docs/b.md",
+      "line": 7,
+      "raw": "| D3 | A row that is fine | agent_resolved | yes | docs/b.md |",
+      "valid": true,
+      "problems": []
+    },
+    {
+      "id": "",
+      "question": "A row with no id",
+      "class": "needs_human",
+      "resolution": "",
+      "evidence": "",
+      "line": 8,
+      "raw": "| | A row with no id | needs_human | — | — |",
+      "valid": false,
+      "problems": [
+        "row has no id"
+      ]
+    },
+    {
+      "id": "D5",
+      "question": "",
+      "class": "needs_human",
+      "resolution": "",
+      "evidence": "",
+      "line": 9,
+      "raw": "| D5 | | needs_human | — | — |",
+      "valid": false,
+      "problems": [
+        "row has no question"
+      ]
+    },
+    {
+      "id": "D6",
+      "question": "An unknown class",
+      "class": "maybe",
+      "resolution": "",
+      "evidence": "",
+      "line": 10,
+      "raw": "| D6 | An unknown class | maybe | — | — |",
+      "valid": false,
+      "problems": [
+        "unknown class \"maybe\" (expected needs_human or agent_resolved)"
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "row": {
+        "id": "D1",
+        "question": "A row with four cells",
+        "class": "agent_resolved",
+        "resolution": "yes",
+        "evidence": "",
+        "line": 5,
+        "raw": "| D1 | A row with four cells | agent_resolved | yes |",
+        "valid": false,
+        "problems": [
+          "expected 5 columns (id, question, class, resolution, evidence), found 4",
+          "agent_resolved without evidence"
+        ]
+      },
+      "reason": "expected 5 columns (id, question, class, resolution, evidence), found 4; agent_resolved without evidence"
+    },
+    {
+      "row": {
+        "id": "D2",
+        "question": "A row with six cells",
+        "class": "agent_resolved",
+        "resolution": "yes",
+        "evidence": "docs/a.md",
+        "line": 6,
+        "raw": "| D2 | A row with six cells | agent_resolved | yes | docs/a.md | extra |",
+        "valid": false,
+        "problems": [
+          "expected 5 columns (id, question, class, resolution, evidence), found 6"
+        ]
+      },
+      "reason": "expected 5 columns (id, question, class, resolution, evidence), found 6"
+    },
+    {
+      "row": {
+        "id": "",
+        "question": "A row with no id",
+        "class": "needs_human",
+        "resolution": "",
+        "evidence": "",
+        "line": 8,
+        "raw": "| | A row with no id | needs_human | — | — |",
+        "valid": false,
+        "problems": [
+          "row has no id"
+        ]
+      },
+      "reason": "row has no id"
+    },
+    {
+      "row": {
+        "id": "D5",
+        "question": "",
+        "class": "needs_human",
+        "resolution": "",
+        "evidence": "",
+        "line": 9,
+        "raw": "| D5 | | needs_human | — | — |",
+        "valid": false,
+        "problems": [
+          "row has no question"
+        ]
+      },
+      "reason": "row has no question"
+    },
+    {
+      "row": {
+        "id": "D6",
+        "question": "An unknown class",
+        "class": "maybe",
+        "resolution": "",
+        "evidence": "",
+        "line": 10,
+        "raw": "| D6 | An unknown class | maybe | — | — |",
+        "valid": false,
+        "problems": [
+          "unknown class \"maybe\" (expected needs_human or agent_resolved)"
+        ]
+      },
+      "reason": "unknown class \"maybe\" (expected needs_human or agent_resolved)"
+    }
+  ]
+}

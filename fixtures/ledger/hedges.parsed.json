@@ -1,0 +1,117 @@
+{
+  "change": "hedges",
+  "parseable": true,
+  "rows": [
+    {
+      "id": "D1",
+      "question": "Is the cache keyed by ref?",
+      "class": "agent_resolved",
+      "resolution": "Yes, by ref then path",
+      "evidence": "",
+      "line": 5,
+      "raw": "| D1 | Is the cache keyed by ref? | agent_resolved | Yes, by ref then path | Obvious. |",
+      "valid": false,
+      "problems": [
+        "agent_resolved without evidence"
+      ]
+    },
+    {
+      "id": "D2",
+      "question": "Does logout clear the cookie?",
+      "class": "agent_resolved",
+      "resolution": "Yes",
+      "evidence": "",
+      "line": 6,
+      "raw": "| D2 | Does logout clear the cookie? | agent_resolved | Yes | see above |",
+      "valid": false,
+      "problems": [
+        "agent_resolved without evidence"
+      ]
+    },
+    {
+      "id": "D3",
+      "question": "Is the token logged?",
+      "class": "agent_resolved",
+      "resolution": "Never",
+      "evidence": "src/lib/githost/github.ts:12",
+      "line": 7,
+      "raw": "| D3 | Is the token logged? | agent_resolved | Never | src/lib/githost/github.ts:12 |",
+      "valid": true,
+      "problems": []
+    },
+    {
+      "id": "D4",
+      "question": "Which port does dev use?",
+      "class": "agent_resolved",
+      "resolution": "",
+      "evidence": "README.md",
+      "line": 8,
+      "raw": "| D4 | Which port does dev use? | agent_resolved | n/a | README.md |",
+      "valid": false,
+      "problems": [
+        "agent_resolved without a written resolution"
+      ]
+    },
+    {
+      "id": "D5",
+      "question": "Do we retry on conflict?",
+      "class": "needs_human",
+      "resolution": "",
+      "evidence": "",
+      "line": 9,
+      "raw": "| D5 | Do we retry on conflict? | Needs Human | tbd | ? |",
+      "valid": true,
+      "problems": []
+    }
+  ],
+  "invalid": [
+    {
+      "row": {
+        "id": "D1",
+        "question": "Is the cache keyed by ref?",
+        "class": "agent_resolved",
+        "resolution": "Yes, by ref then path",
+        "evidence": "",
+        "line": 5,
+        "raw": "| D1 | Is the cache keyed by ref? | agent_resolved | Yes, by ref then path | Obvious. |",
+        "valid": false,
+        "problems": [
+          "agent_resolved without evidence"
+        ]
+      },
+      "reason": "agent_resolved without evidence"
+    },
+    {
+      "row": {
+        "id": "D2",
+        "question": "Does logout clear the cookie?",
+        "class": "agent_resolved",
+        "resolution": "Yes",
+        "evidence": "",
+        "line": 6,
+        "raw": "| D2 | Does logout clear the cookie? | agent_resolved | Yes | see above |",
+        "valid": false,
+        "problems": [
+          "agent_resolved without evidence"
+        ]
+      },
+      "reason": "agent_resolved without evidence"
+    },
+    {
+      "row": {
+        "id": "D4",
+        "question": "Which port does dev use?",
+        "class": "agent_resolved",
+        "resolution": "",
+        "evidence": "README.md",
+        "line": 8,
+        "raw": "| D4 | Which port does dev use? | agent_resolved | n/a | README.md |",
+        "valid": false,
+        "problems": [
+          "agent_resolved without a written resolution"
+        ]
+      },
+      "reason": "agent_resolved without a written resolution"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "interlock.checkpoint/1",
+  "change": "add-user-auth",
+  "request": {
+    "kind": "checkpoint",
+    "requestedAt": "2026-09-05T03:10:00Z",
+    "headSha": "cd77a9bbd44319ca73e560cc2a0016048c83448d",
+    "risk": { "class": "medium", "signals": ["auth-surface"] },
+    "tasks": { "total": 12, "waves": 3 },
+    "ledger": { "needsHuman": 1, "agentResolved": 3, "invalid": 0 }
+  },
+  "senderNote": "kept as an unknown top-level field"
+}

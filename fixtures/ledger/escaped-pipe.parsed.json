@@ -1,0 +1,29 @@
+{
+  "change": "escaped-pipe",
+  "parseable": true,
+  "rows": [
+    {
+      "id": "D1",
+      "question": "Should the row split on `a | b` or keep it whole?",
+      "class": "needs_human",
+      "resolution": "",
+      "evidence": "",
+      "line": 5,
+      "raw": "| D1 | Should the row split on `a \\| b` or keep it whole? | needs_human | — | — |",
+      "valid": true,
+      "problems": []
+    },
+    {
+      "id": "D2",
+      "question": "Which separator is written for an empty cell?",
+      "class": "agent_resolved",
+      "resolution": "The em dash, written as `|` never",
+      "evidence": "lib/ledger.mjs:283",
+      "line": 6,
+      "raw": "| D2 | Which separator is written for an empty cell? | agent_resolved | The em dash, written as `\\|` never | lib/ledger.mjs:283 |",
+      "valid": true,
+      "problems": []
+    }
+  ],
+  "invalid": []
+}

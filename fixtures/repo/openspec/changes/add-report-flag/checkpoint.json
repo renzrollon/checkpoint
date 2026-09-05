@@ -1,0 +1,19 @@
+{
+  "schema": "interlock.checkpoint/1",
+  "change": "add-report-flag",
+  "request": {
+    "kind": "checkpoint",
+    "requestedAt": "2026-09-04T18:00:00Z",
+    "headSha": "cd77a9bbd44319ca73e560cc2a0016048c83448d",
+    "risk": { "class": "low", "signals": [] },
+    "tasks": { "total": 5, "waves": 2 },
+    "ledger": { "needsHuman": 0, "agentResolved": 2, "invalid": 0 }
+  },
+  "decision": {
+    "state": "approved",
+    "note": "",
+    "decidedAt": "2026-09-04T19:30:00Z",
+    "decidedBy": "checkpoint",
+    "headSha": "cd77a9bbd44319ca73e560cc2a0016048c83448d"
+  }
+}

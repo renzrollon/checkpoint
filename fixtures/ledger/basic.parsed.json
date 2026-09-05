@@ -1,0 +1,40 @@
+{
+  "change": "add-user-auth",
+  "parseable": true,
+  "rows": [
+    {
+      "id": "D1",
+      "question": "How is the reader app itself gated: a shared access key exchanged for an httpOnly session cookie, Vercel Deployment Protection, or Cloudflare Access?",
+      "class": "needs_human",
+      "resolution": "",
+      "evidence": "",
+      "line": 7,
+      "raw": "| D1 | How is the reader app itself gated: a shared access key exchanged for an httpOnly session cookie, Vercel Deployment Protection, or Cloudflare Access? | needs_human | — | — |",
+      "valid": true,
+      "problems": []
+    },
+    {
+      "id": "D2",
+      "question": "Which git host does the adapter target in production?",
+      "class": "agent_resolved",
+      "resolution": "GitHub; the adapter contract stays host-neutral",
+      "evidence": "`git remote -v` on both source repos",
+      "line": 8,
+      "raw": "| D2 | Which git host does the adapter target in production? | agent_resolved | GitHub; the adapter contract stays host-neutral | `git remote -v` on both source repos |",
+      "valid": true,
+      "problems": []
+    },
+    {
+      "id": "D3",
+      "question": "Where does the approval marker live?",
+      "class": "agent_resolved",
+      "resolution": "`openspec/changes/<change>/checkpoint.json`",
+      "evidence": "app-ideas brief `:86`",
+      "line": 9,
+      "raw": "| D3 | Where does the approval marker live? | agent_resolved | `openspec/changes/<change>/checkpoint.json` | app-ideas brief `:86` |",
+      "valid": true,
+      "problems": []
+    }
+  ],
+  "invalid": []
+}
