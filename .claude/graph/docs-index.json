@@ -1,0 +1,1023 @@
+{
+  "generated_at": "2026-09-05T17:23:25.087Z",
+  "dirs": [
+    "docs",
+    "openspec/specs",
+    "README.md"
+  ],
+  "files": [
+    {
+      "path": "docs/how-checkpoint-works.md",
+      "sha256": "4db0fef84ad49dfda133bc0d8941c8c8ed87d4f944b4bf467a8ad0c75318e83c",
+      "tokens_est": 2622,
+      "sections": [
+        {
+          "heading": "How Checkpoint works, and how it fits Interlock",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 7,
+          "tokens_est": 87,
+          "blurb": "Checkpoint is the phone-side half of Interlock's human checkpoint. This page explains the problem it solves, what was built, exactly where it touches the Interl…"
+        },
+        {
+          "heading": "The problem",
+          "level": 2,
+          "startLine": 8,
+          "endLine": 21,
+          "tokens_est": 182,
+          "blurb": "Interlock's workflow has one deliberate stop. `/interlock:spec` writes a change's artifacts and then halts for a human read; `/interlock:ship` runs start-to-com…"
+        },
+        {
+          "heading": "What was built",
+          "level": 2,
+          "startLine": 22,
+          "endLine": 52,
+          "tokens_est": 420,
+          "blurb": "A Next.js 16 app, phone-first at 375 px, that treats a GitHub branch as its only backend. There is no database and no channel between the phone and the laptop.…"
+        },
+        {
+          "heading": "Module map",
+          "level": 3,
+          "startLine": 53,
+          "endLine": 65,
+          "tokens_est": 406,
+          "blurb": "| Area | Files | Role | |---|---|---| | Git host adapter | `src/lib/githost/*` | One contract (`resolveRef`, `readFile`, `listDir`, `writeFile`) with two implem…"
+        },
+        {
+          "heading": "How it integrates with Interlock (specflow)",
+          "level": 2,
+          "startLine": 66,
+          "endLine": 71,
+          "tokens_est": 56,
+          "blurb": "Checkpoint never imports Interlock and never calls it. The two repositories meet only through files on the branch. There are three touch points, and their state…"
+        },
+        {
+          "heading": "1. The decision ledger: shared today, and fully effective",
+          "level": 3,
+          "startLine": 72,
+          "endLine": 96,
+          "tokens_est": 309,
+          "blurb": "This is the real integration. `interlock ready` on the laptop reads `decisions.md` with `lib/ledger.mjs` and blocks on any `needs_human` row or any invalid row.…"
+        },
+        {
+          "heading": "2. The `checkpoint.json` marker: written today, not yet read by Interlock",
+          "level": 3,
+          "startLine": 97,
+          "endLine": 129,
+          "tokens_est": 316,
+          "blurb": "Checkpoint writes `openspec/changes/<change>/checkpoint.json` on approve or send back: { \"schema\": \"interlock.checkpoint/1\", \"change\": \"add-user-auth\", \"request…"
+        },
+        {
+          "heading": "3. The push to the phone: assumed, not built",
+          "level": 3,
+          "startLine": 130,
+          "endLine": 141,
+          "tokens_est": 160,
+          "blurb": "The design assumes a sender in specflow that writes a `request` block into `checkpoint.json` (head SHA, risk class and signals, task and ledger counts) and send…"
+        },
+        {
+          "heading": "The flow end to end",
+          "level": 3,
+          "startLine": 142,
+          "endLine": 162,
+          "tokens_est": 208,
+          "blurb": "sequenceDiagram participant L as Laptop (Interlock) participant G as GitHub branch participant P as Phone (Checkpoint) L->>G: /interlock:spec commits proposal,…"
+        },
+        {
+          "heading": "Safety properties worth knowing",
+          "level": 2,
+          "startLine": 163,
+          "endLine": 177,
+          "tokens_est": 197,
+          "blurb": "- **Two files, one repository.** The adapter's path guard runs before any network call. The GitHub token is fine-grained, Contents read and write on the one rep…"
+        },
+        {
+          "heading": "What is still open",
+          "level": 2,
+          "startLine": 178,
+          "endLine": 188,
+          "tokens_est": 140,
+          "blurb": "- **Decision D1** in the archived change's ledger is still `needs_human`: how the app itself is gated. The shared-key cookie is the implemented default. Vercel…"
+        },
+        {
+          "heading": "Where the design came from",
+          "level": 2,
+          "startLine": 189,
+          "endLine": 198,
+          "tokens_est": 139,
+          "blurb": "The UI was implemented from a Claude Design comp briefed from this repo (design decision D21 in the archived change), using Interlock's Nocturne palette so Chec…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/access-gate/spec.md",
+      "sha256": "ab99144fb7d9e68ca0a4152ac383f4e12dc5b77a11d0375cf5f73dd17123e817",
+      "tokens_est": 1464,
+      "sections": [
+        {
+          "heading": "access-gate",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 54,
+          "blurb": "Keeps the reader private to its one owner: nothing renders and nothing is written until a shared access key has been exchanged for a session, and a missing key…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: Every route is gated by a session",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 148,
+          "blurb": "The app SHALL refuse every page and API route, except the login page, the session endpoint and the PWA manifest and icons, unless the request carries a valid se…"
+        },
+        {
+          "heading": "Scenario: Unauthenticated page request is redirected to login",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 16,
+          "tokens_est": 81,
+          "blurb": "- **GIVEN** a request for `/changes/add-user-auth` carries no session cookie - **WHEN** the gate handles it - **THEN** the response status is 307, its `Location…"
+        },
+        {
+          "heading": "Scenario: Edge case — the redirect ignores the server's bind address",
+          "level": 4,
+          "startLine": 17,
+          "endLine": 22,
+          "tokens_est": 151,
+          "blurb": "- **GIVEN** the server is bound to `0.0.0.0` and a phone on the LAN requests `/changes/add-user-auth?ref=feat/auth` with a `Host` of `192.168.7.42:3200`, so the…"
+        },
+        {
+          "heading": "Scenario: Unauthenticated write is rejected with 401",
+          "level": 4,
+          "startLine": 23,
+          "endLine": 26,
+          "tokens_est": 60,
+          "blurb": "- **WHEN** a request to answer a ledger row carries no session cookie - **THEN** the response is 401 with body `{ \"error\": \"unauthenticated\" }` and nothing is w…"
+        },
+        {
+          "heading": "Scenario: Tampered session cookie is rejected",
+          "level": 4,
+          "startLine": 27,
+          "endLine": 30,
+          "tokens_est": 54,
+          "blurb": "- **WHEN** a request carries a session cookie whose signature does not verify - **THEN** the request is treated exactly as unauthenticated and the cookie is cle…"
+        },
+        {
+          "heading": "Scenario: Expired session is rejected",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 58,
+          "blurb": "- **WHEN** a request carries a session cookie whose signature verifies but whose expiry is in the past - **THEN** the request is treated exactly as unauthentica…"
+        },
+        {
+          "heading": "Requirement: Access key exchange",
+          "level": 3,
+          "startLine": 35,
+          "endLine": 37,
+          "tokens_est": 195,
+          "blurb": "The session endpoint SHALL accept the access key, compare it to the configured key in constant time, and on success set an httpOnly, SameSite=Lax session cookie…"
+        },
+        {
+          "heading": "Scenario: Correct key issues a session",
+          "level": 4,
+          "startLine": 38,
+          "endLine": 43,
+          "tokens_est": 115,
+          "blurb": "- **GIVEN** the login form posts the configured access key with `next=/changes/add-user-auth` - **WHEN** the session endpoint handles it - **THEN** a session co…"
+        },
+        {
+          "heading": "Scenario: Edge case — the redirect does not depend on how the server was addressed",
+          "level": 4,
+          "startLine": 44,
+          "endLine": 49,
+          "tokens_est": 135,
+          "blurb": "- **GIVEN** the server's own request URL reads `http://0.0.0.0:3200/api/session` because it is bound to `0.0.0.0` and the phone sent `Host: 192.168.7.42:3200` -…"
+        },
+        {
+          "heading": "Scenario: Edge case — an unsafe next falls back to the inbox",
+          "level": 4,
+          "startLine": 50,
+          "endLine": 54,
+          "tokens_est": 63,
+          "blurb": "- **GIVEN** the configured key is posted - **WHEN** `next` is `//evil.example`, `https://evil.example/x`, `/login`, or absent - **THEN** the response is 303 wit…"
+        },
+        {
+          "heading": "Scenario: Edge case — the Secure attribute follows the transport",
+          "level": 4,
+          "startLine": 55,
+          "endLine": 60,
+          "tokens_est": 109,
+          "blurb": "- **GIVEN** a development server (not production) reached over plain http from a LAN address - **WHEN** the configured key is posted - **THEN** the session cook…"
+        },
+        {
+          "heading": "Scenario: Wrong key is refused",
+          "level": 4,
+          "startLine": 61,
+          "endLine": 64,
+          "tokens_est": 58,
+          "blurb": "- **WHEN** the login form posts a key that differs from the configured key in any character - **THEN** the response is 401, no cookie is set, and the login page…"
+        },
+        {
+          "heading": "Scenario: Logout clears the session",
+          "level": 4,
+          "startLine": 65,
+          "endLine": 68,
+          "tokens_est": 48,
+          "blurb": "- **WHEN** an authenticated user activates \"Sign out\" - **THEN** the session cookie is cleared and the next page request redirects to the login page"
+        },
+        {
+          "heading": "Requirement: Missing key configuration fails closed",
+          "level": 3,
+          "startLine": 69,
+          "endLine": 71,
+          "tokens_est": 67,
+          "blurb": "When no access key is configured on the server, the app SHALL respond 503 to every request except the manifest and icons, with the text \"Checkpoint has no acces…"
+        },
+        {
+          "heading": "Scenario: No configured key blocks login",
+          "level": 4,
+          "startLine": 72,
+          "endLine": 75,
+          "tokens_est": 57,
+          "blurb": "- **WHEN** the server has no access key configured and any key is posted to the session endpoint - **THEN** the response is 503 with the configuration message a…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/change-inbox/spec.md",
+      "sha256": "1221153a1852c1cc9a84772597974e76371d83a2743c579fbb14d2e23dc17032",
+      "tokens_est": 544,
+      "sections": [
+        {
+          "heading": "change-inbox",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 46,
+          "blurb": "Shows, on one phone screen, every active change on a ref and whether each one is waiting on a person, so the owner can pick the one the push was about without t…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: List active changes on a ref",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 146,
+          "blurb": "The inbox SHALL list every directory under `openspec/changes/` on the requested ref except `archive`, ordered with changes that have blocking ledger rows first…"
+        },
+        {
+          "heading": "Scenario: Inbox lists changes with ledger status",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 15,
+          "tokens_est": 89,
+          "blurb": "- **WHEN** the ref holds changes `add-user-auth` (one `needs_human` row) and `add-report-flag` (ledger clear, decision approved) - **THEN** the inbox shows `add…"
+        },
+        {
+          "heading": "Scenario: Missing ledger is shown as missing not clear",
+          "level": 4,
+          "startLine": 16,
+          "endLine": 19,
+          "tokens_est": 48,
+          "blurb": "- **WHEN** a listed change has no `decisions.md` - **THEN** its entry shows \"ledger missing\" and is sorted with the blocking changes"
+        },
+        {
+          "heading": "Scenario: Ref from query parameter",
+          "level": 4,
+          "startLine": 20,
+          "endLine": 23,
+          "tokens_est": 46,
+          "blurb": "- **WHEN** the inbox is requested with `?ref=feat/auth` - **THEN** the listing is read from `feat/auth` and the page header shows `feat/auth`"
+        },
+        {
+          "heading": "Requirement: Empty and failed listings are spoken",
+          "level": 3,
+          "startLine": 24,
+          "endLine": 26,
+          "tokens_est": 54,
+          "blurb": "When no active change exists the inbox SHALL say so. When the git host fails, the inbox SHALL show the failure kind and a retry control instead of an empty list…"
+        },
+        {
+          "heading": "Scenario: No active changes",
+          "level": 4,
+          "startLine": 27,
+          "endLine": 30,
+          "tokens_est": 43,
+          "blurb": "- **WHEN** `openspec/changes/` on the ref contains only `archive` - **THEN** the inbox shows \"No active changes on <ref>\" and no entries"
+        },
+        {
+          "heading": "Scenario: Host failure on the inbox is named",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 62,
+          "blurb": "- **WHEN** the adapter fails with kind `unauthorized` while listing - **THEN** the inbox shows \"GitHub rejected the token (unauthorized)\" with a retry control a…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/change-reading/spec.md",
+      "sha256": "d3638dc5c06cee316f69924d2ffe8e24d621fea3f92efab05d7d9a587a5d50e4",
+      "tokens_est": 1028,
+      "sections": [
+        {
+          "heading": "change-reading",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 49,
+          "blurb": "Renders one change the way the checkpoint procedure asks it to be read, proposal to specs, on a phone, with every number carrying its denominator and every unob…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: Artifacts in reading order",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 110,
+          "blurb": "The change page SHALL present `proposal.md`, `design.md`, `tasks.md` and the delta specs under `specs/**` as four sections in that order, plus the ledger, reach…"
+        },
+        {
+          "heading": "Scenario: Four artifacts plus ledger tabs",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 15,
+          "tokens_est": 65,
+          "blurb": "- **WHEN** the change page for `add-user-auth` loads - **THEN** tabs appear in the order Proposal, Design, Tasks, Specs, Ledger, the Proposal tab is active, and…"
+        },
+        {
+          "heading": "Scenario: Raw HTML in an artifact is escaped",
+          "level": 4,
+          "startLine": 16,
+          "endLine": 19,
+          "tokens_est": 50,
+          "blurb": "- **WHEN** `design.md` contains `<script>alert(1)</script>` - **THEN** the page shows that text literally and no script element exists in the document"
+        },
+        {
+          "heading": "Scenario: Missing artifact is shown as missing",
+          "level": 4,
+          "startLine": 20,
+          "endLine": 23,
+          "tokens_est": 48,
+          "blurb": "- **WHEN** the change has no `design.md` - **THEN** the Design tab shows \"design.md is missing on <ref>\" and the other tabs render normally"
+        },
+        {
+          "heading": "Scenario: Specs tree renders every delta spec",
+          "level": 4,
+          "startLine": 24,
+          "endLine": 27,
+          "tokens_est": 52,
+          "blurb": "- **WHEN** `specs/` holds `access-gate/spec.md` and `change-inbox/spec.md` - **THEN** the Specs tab shows both, each under a heading with its capability path"
+        },
+        {
+          "heading": "Requirement: Header with counts and denominators",
+          "level": 3,
+          "startLine": 28,
+          "endLine": 30,
+          "tokens_est": 93,
+          "blurb": "The header SHALL show the change name, the ref and the head SHA (short form), the task count as done of total, the wave count, the ledger summary as needs-human…"
+        },
+        {
+          "heading": "Scenario: Counts come from the artifacts",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 50,
+          "blurb": "- **WHEN** `tasks.md` has three `## N.` sections and twelve checkboxes of which four are ticked - **THEN** the header shows \"4 of 12 tasks\" and \"3 waves\""
+        },
+        {
+          "heading": "Scenario: Ledger summary with invalid rows",
+          "level": 4,
+          "startLine": 35,
+          "endLine": 38,
+          "tokens_est": 74,
+          "blurb": "- **WHEN** `decisions.md` has five rows: one `needs_human`, three valid `agent_resolved`, one `agent_resolved` with an empty evidence cell - **THEN** the header…"
+        },
+        {
+          "heading": "Requirement: Risk is shown only when observed",
+          "level": 3,
+          "startLine": 39,
+          "endLine": 41,
+          "tokens_est": 89,
+          "blurb": "The header SHALL show the risk class only when the sender recorded one in `checkpoint.json` on the ref, together with the head SHA it was recorded against. When…"
+        },
+        {
+          "heading": "Scenario: Recorded risk is shown with its head",
+          "level": 4,
+          "startLine": 42,
+          "endLine": 45,
+          "tokens_est": 60,
+          "blurb": "- **WHEN** `checkpoint.json` carries `request.risk.class = \"medium\"` and `request.headSha` equal to the current head - **THEN** the header shows \"risk medium\" a…"
+        },
+        {
+          "heading": "Scenario: Risk recorded for an older head is stale",
+          "level": 4,
+          "startLine": 46,
+          "endLine": 49,
+          "tokens_est": 63,
+          "blurb": "- **WHEN** `checkpoint.json` carries a risk class but its `request.headSha` differs from the current head - **THEN** the header shows the class with the label \"…"
+        },
+        {
+          "heading": "Scenario: No recorded risk is unobserved",
+          "level": 4,
+          "startLine": 50,
+          "endLine": 53,
+          "tokens_est": 50,
+          "blurb": "- **WHEN** there is no `checkpoint.json` or it has no `request` block - **THEN** the header shows \"risk unobserved\" and the page otherwise renders fully"
+        },
+        {
+          "heading": "Requirement: Change page failures are spoken",
+          "level": 3,
+          "startLine": 54,
+          "endLine": 56,
+          "tokens_est": 59,
+          "blurb": "When a change directory does not exist on the ref the page SHALL say so with the ref and offer the inbox. When the git host fails the page SHALL show the failur…"
+        },
+        {
+          "heading": "Scenario: Unknown change on the ref",
+          "level": 4,
+          "startLine": 57,
+          "endLine": 60,
+          "tokens_est": 46,
+          "blurb": "- **WHEN** `/changes/no-such-change` is requested - **THEN** the page shows \"No change named no-such-change on <ref>\" with a link to the inbox"
+        },
+        {
+          "heading": "Scenario: Host failure on the change page is named",
+          "level": 4,
+          "startLine": 61,
+          "endLine": 64,
+          "tokens_est": 56,
+          "blurb": "- **WHEN** the adapter fails with kind `forbidden` carrying a `retryAt` - **THEN** the page shows \"GitHub refused (forbidden), retry after <time>\" and a retry c…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/checkpoint-decision/spec.md",
+      "sha256": "4e8228ee5c3d6e57e531e7f52f087ecb4b41ebde1e376c7f299034c369bd71fd",
+      "tokens_est": 875,
+      "sections": [
+        {
+          "heading": "checkpoint-decision",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 6,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 47,
+          "blurb": "Records the owner's approve or send-back verdict on the change branch as a file the laptop side can read, and refuses to record an approval the laptop side woul…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: Decision file on the branch",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 150,
+          "blurb": "A decision SHALL be written to `openspec/changes/<change>/checkpoint.json` on the ref as JSON with `schema` equal to `interlock.checkpoint/1`, the change name,…"
+        },
+        {
+          "heading": "Scenario: Approve writes the decision file",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 15,
+          "tokens_est": 80,
+          "blurb": "- **WHEN** the owner approves `add-user-auth` while the ref head is `0123456…` - **THEN** `checkpoint.json` on the ref contains `decision.state = \"approved\"`, `…"
+        },
+        {
+          "heading": "Scenario: Send back requires a note",
+          "level": 4,
+          "startLine": 16,
+          "endLine": 19,
+          "tokens_est": 43,
+          "blurb": "- **WHEN** the owner chooses \"Send back\" without a note - **THEN** the form shows \"Say what should change\" and nothing is written"
+        },
+        {
+          "heading": "Scenario: Send back writes the note",
+          "level": 4,
+          "startLine": 20,
+          "endLine": 23,
+          "tokens_est": 58,
+          "blurb": "- **WHEN** the owner sends back with the note \"Split the auth change out\" - **THEN** `checkpoint.json` holds `decision.state = \"returned\"` and `decision.note =…"
+        },
+        {
+          "heading": "Scenario: Unknown fields survive a decision write",
+          "level": 4,
+          "startLine": 24,
+          "endLine": 27,
+          "tokens_est": 56,
+          "blurb": "- **WHEN** the existing `checkpoint.json` carries a top-level field the app does not know - **THEN** the written file still carries that field with its value un…"
+        },
+        {
+          "heading": "Requirement: Approve is disabled while the ledger blocks",
+          "level": 3,
+          "startLine": 28,
+          "endLine": 30,
+          "tokens_est": 70,
+          "blurb": "The app SHALL not approve while the ledger has any `needs_human` row, any invalid row, is missing, or is unparseable, and SHALL say which of those is the reason…"
+        },
+        {
+          "heading": "Scenario: Approve blocked by a needs_human row",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 53,
+          "blurb": "- **WHEN** the ledger has one `needs_human` row - **THEN** the Approve control is disabled with the text \"1 decision still needs you\" and Send back is enabled"
+        },
+        {
+          "heading": "Scenario: Approve blocked by a missing ledger",
+          "level": 4,
+          "startLine": 35,
+          "endLine": 38,
+          "tokens_est": 57,
+          "blurb": "- **WHEN** the change has no `decisions.md` - **THEN** Approve is disabled with the text \"decisions.md is missing; the laptop side would refuse this\" and Send b…"
+        },
+        {
+          "heading": "Scenario: Server refuses an approve that bypasses the control",
+          "level": 4,
+          "startLine": 39,
+          "endLine": 42,
+          "tokens_est": 55,
+          "blurb": "- **WHEN** an approve request arrives for a change whose ledger blocks - **THEN** the server responds with \"ledger blocks approval\" and writes nothing"
+        },
+        {
+          "heading": "Requirement: Decision state is visible and replaceable",
+          "level": 3,
+          "startLine": 43,
+          "endLine": 45,
+          "tokens_est": 67,
+          "blurb": "The page SHALL show the current decision (state, note, decided time, head) when one exists, SHALL label it stale when the ref head has moved past its `headSha`,…"
+        },
+        {
+          "heading": "Scenario: Stale approval after the branch moved",
+          "level": 4,
+          "startLine": 46,
+          "endLine": 49,
+          "tokens_est": 67,
+          "blurb": "- **WHEN** `checkpoint.json` holds an approval for head `0123456…` and the ref head is now `89abcde…` - **THEN** the decision bar shows \"approved at 0123456, br…"
+        },
+        {
+          "heading": "Scenario: Decision write conflict",
+          "level": 4,
+          "startLine": 50,
+          "endLine": 53,
+          "tokens_est": 62,
+          "blurb": "- **WHEN** `checkpoint.json` changed on the ref between page load and the decision - **THEN** the decision is not written and the bar shows \"The decision file c…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/git-host-adapter/spec.md",
+      "sha256": "53777c37ff88cc60c0a645c23fa3d923b33eff1e11eed2836895c7a78a47992f",
+      "tokens_est": 1101,
+      "sections": [
+        {
+          "heading": "git-host-adapter",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 5,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 61,
+          "blurb": "Gives the reader one narrow, typed way to read a change's files from a branch and to write exactly two files back, so the git host can be GitHub in production a…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: Read operations against a ref",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 94,
+          "blurb": "The adapter SHALL resolve a ref to its head commit SHA, read a file at a path on that ref returning its text and blob SHA, and list a directory on that ref retu…"
+        },
+        {
+          "heading": "Scenario: Read a file with its blob sha",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 15,
+          "tokens_est": 58,
+          "blurb": "- **WHEN** the adapter reads `openspec/changes/add-user-auth/decisions.md` on ref `feat/auth` - **THEN** it returns the decoded UTF-8 text and the blob SHA the…"
+        },
+        {
+          "heading": "Scenario: Missing file is a typed not-found",
+          "level": 4,
+          "startLine": 16,
+          "endLine": 19,
+          "tokens_est": 55,
+          "blurb": "- **WHEN** the adapter reads a path that does not exist on the ref - **THEN** it fails with an error of kind `not_found` naming the path and ref, and no other e…"
+        },
+        {
+          "heading": "Scenario: Default branch is used when ref is omitted",
+          "level": 4,
+          "startLine": 20,
+          "endLine": 23,
+          "tokens_est": 60,
+          "blurb": "- **WHEN** the adapter is asked for the head SHA with no ref - **THEN** it resolves the repository's default branch and returns that branch's head SHA together…"
+        },
+        {
+          "heading": "Scenario: Directory listing distinguishes files from directories",
+          "level": 4,
+          "startLine": 24,
+          "endLine": 27,
+          "tokens_est": 65,
+          "blurb": "- **WHEN** the adapter lists `openspec/changes` on a ref - **THEN** each entry carries its name and whether it is a file or a directory, and the `archive` direc…"
+        },
+        {
+          "heading": "Requirement: Guarded write with base blob sha",
+          "level": 3,
+          "startLine": 28,
+          "endLine": 30,
+          "tokens_est": 115,
+          "blurb": "The adapter SHALL write a file only when the caller supplies the blob SHA it last read for that path (or declares the file new), a commit message, and a target…"
+        },
+        {
+          "heading": "Scenario: Write with current sha succeeds",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 66,
+          "blurb": "- **WHEN** the caller writes `decisions.md` with the blob SHA it read moments before - **THEN** the host records a new commit on the ref with the given message…"
+        },
+        {
+          "heading": "Scenario: Stale sha is a conflict",
+          "level": 4,
+          "startLine": 35,
+          "endLine": 38,
+          "tokens_est": 49,
+          "blurb": "- **WHEN** the caller writes with a blob SHA that no longer matches the file on the ref - **THEN** the adapter fails with kind `conflict` and does not retry"
+        },
+        {
+          "heading": "Scenario: Write outside the allowed paths is refused locally",
+          "level": 4,
+          "startLine": 39,
+          "endLine": 42,
+          "tokens_est": 66,
+          "blurb": "- **WHEN** the caller attempts to write `src/app/page.tsx` or `openspec/changes/add-user-auth/tasks.md` - **THEN** the adapter fails with kind `forbidden_path`…"
+        },
+        {
+          "heading": "Requirement: Failure classes are named",
+          "level": 3,
+          "startLine": 43,
+          "endLine": 45,
+          "tokens_est": 93,
+          "blurb": "Every failure SHALL be one of `unauthorized` (bad or missing token), `forbidden` (token lacks the permission, or rate limited, carrying the reset time when the…"
+        },
+        {
+          "heading": "Scenario: Rate limit carries its reset time",
+          "level": 4,
+          "startLine": 46,
+          "endLine": 49,
+          "tokens_est": 53,
+          "blurb": "- **WHEN** the host answers 403 with a rate-limit reset header - **THEN** the adapter fails with kind `forbidden` and a `retryAt` timestamp taken from that head…"
+        },
+        {
+          "heading": "Scenario: Bad token is unauthorized",
+          "level": 4,
+          "startLine": 50,
+          "endLine": 53,
+          "tokens_est": 43,
+          "blurb": "- **WHEN** the host answers 401 - **THEN** the adapter fails with kind `unauthorized` and the message does not include the token"
+        },
+        {
+          "heading": "Requirement: Fixture adapter with the same contract",
+          "level": 3,
+          "startLine": 54,
+          "endLine": 56,
+          "tokens_est": 76,
+          "blurb": "A second adapter SHALL serve the same operations from a local directory tree, computing blob SHAs the way git does so that conflict behaviour matches, and SHALL…"
+        },
+        {
+          "heading": "Scenario: Fixture adapter passes the shared contract tests",
+          "level": 4,
+          "startLine": 57,
+          "endLine": 60,
+          "tokens_est": 64,
+          "blurb": "- **WHEN** the shared adapter contract test suite runs against the fixture adapter - **THEN** every read, write, conflict and path-guard scenario above passes w…"
+        },
+        {
+          "heading": "Scenario: Fixture write then read reflects the write",
+          "level": 4,
+          "startLine": 61,
+          "endLine": 64,
+          "tokens_est": 74,
+          "blurb": "- **WHEN** a test writes `checkpoint.json` through the fixture adapter and reads it back on the same ref - **THEN** the read returns the written content and a b…"
+        }
+      ]
+    },
+    {
+      "path": "openspec/specs/ledger-answering/spec.md",
+      "sha256": "44a03cff0a3a0513e2ba2e100b39481861acd80866bf7ec718bae3bb3dd9ba96",
+      "tokens_est": 1089,
+      "sections": [
+        {
+          "heading": "ledger-answering",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 2,
+          "tokens_est": 5,
+          "blurb": ""
+        },
+        {
+          "heading": "Purpose",
+          "level": 2,
+          "startLine": 3,
+          "endLine": 6,
+          "tokens_est": 53,
+          "blurb": "Lets the owner answer a `needs_human` row from the phone and commit a `decisions.md` that Interlock's own ledger audit accepts without a single invalid row, so…"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "startLine": 7,
+          "endLine": 8,
+          "tokens_est": 4,
+          "blurb": ""
+        },
+        {
+          "heading": "Requirement: Ledger parse and serialize parity with Interlock",
+          "level": 3,
+          "startLine": 9,
+          "endLine": 11,
+          "tokens_est": 130,
+          "blurb": "The app SHALL parse and serialize `decisions.md` with the same grammar Interlock's `interlock ledger` audit uses: a `# Decisions — <change>` heading, a five-col…"
+        },
+        {
+          "heading": "Scenario: Golden fixtures round-trip",
+          "level": 4,
+          "startLine": 12,
+          "endLine": 15,
+          "tokens_est": 63,
+          "blurb": "- **WHEN** each fixture ledger is parsed and re-serialized by the app - **THEN** the output is byte-identical to the golden output produced by Interlock's seria…"
+        },
+        {
+          "heading": "Scenario: Escaped pipe survives an edit",
+          "level": 4,
+          "startLine": 16,
+          "endLine": 19,
+          "tokens_est": 58,
+          "blurb": "- **WHEN** a row whose question contains `\\|` is answered and re-serialized - **THEN** the question cell still contains the escaped pipe and the file parses to…"
+        },
+        {
+          "heading": "Scenario: Hedge cells read as empty",
+          "level": 4,
+          "startLine": 20,
+          "endLine": 23,
+          "tokens_est": 53,
+          "blurb": "- **WHEN** a row's evidence cell is `Obvious.` or `see above` - **THEN** the parser reports the evidence as empty and the row as invalid when its class is `agen…"
+        },
+        {
+          "heading": "Scenario: Unparseable ledger is reported not emptied",
+          "level": 4,
+          "startLine": 24,
+          "endLine": 27,
+          "tokens_est": 56,
+          "blurb": "- **WHEN** `decisions.md` has neither a decisions heading nor a table - **THEN** the app reports the ledger as unparseable and blocking, and offers no rows to a…"
+        },
+        {
+          "heading": "Requirement: Answer a needs_human row in place",
+          "level": 3,
+          "startLine": 28,
+          "endLine": 30,
+          "tokens_est": 149,
+          "blurb": "The app SHALL let the owner answer only rows whose class is `needs_human`. Answering SHALL set the class to `agent_resolved`, the resolution to the answer, and…"
+        },
+        {
+          "heading": "Scenario: Answer flips the row",
+          "level": 4,
+          "startLine": 31,
+          "endLine": 34,
+          "tokens_est": 86,
+          "blurb": "- **WHEN** row `D1` (`needs_human`) is answered with \"shared access key cookie\" on 2026-09-05 - **THEN** the committed `decisions.md` has `D1` as `| D1 | <same…"
+        },
+        {
+          "heading": "Scenario: Answer containing a pipe is escaped",
+          "level": 4,
+          "startLine": 35,
+          "endLine": 38,
+          "tokens_est": 56,
+          "blurb": "- **WHEN** row `D1` is answered with \"cookie | 30 days\" - **THEN** the resolution cell reads `cookie \\| 30 days`, the file still parses to five columns, and the…"
+        },
+        {
+          "heading": "Scenario: Blank answer is refused",
+          "level": 4,
+          "startLine": 39,
+          "endLine": 42,
+          "tokens_est": 41,
+          "blurb": "- **WHEN** row `D1` is answered with whitespace only - **THEN** the form shows \"An answer is required\" and nothing is written"
+        },
+        {
+          "heading": "Scenario: Answering a resolved row is refused",
+          "level": 4,
+          "startLine": 43,
+          "endLine": 46,
+          "tokens_est": 56,
+          "blurb": "- **WHEN** an answer is submitted for a row whose class is already `agent_resolved` - **THEN** the request fails with \"D2 is not waiting on a person\" and nothin…"
+        },
+        {
+          "heading": "Scenario: Options offered from the question text",
+          "level": 4,
+          "startLine": 47,
+          "endLine": 50,
+          "tokens_est": 62,
+          "blurb": "- **WHEN** the question reads \"Pin zod 4.4.3 or leave it unpinned?\" - **THEN** the form offers the choices \"Pin zod 4.4.3\" and \"leave it unpinned\" as one-tap op…"
+        },
+        {
+          "heading": "Scenario: Options from a colon-prefixed list",
+          "level": 4,
+          "startLine": 51,
+          "endLine": 54,
+          "tokens_est": 70,
+          "blurb": "- **WHEN** the question reads \"How is the app gated: a cookie, Deployment Protection, or Cloudflare Access?\" - **THEN** the form offers \"a cookie\", \"Deployment…"
+        },
+        {
+          "heading": "Requirement: Stale ledger writes are refused",
+          "level": 3,
+          "startLine": 55,
+          "endLine": 57,
+          "tokens_est": 69,
+          "blurb": "The write SHALL use the blob SHA of the `decisions.md` that was shown to the owner. When the file changed on the ref since, the write SHALL fail without retry a…"
+        },
+        {
+          "heading": "Scenario: Ledger changed since it was shown",
+          "level": 4,
+          "startLine": 58,
+          "endLine": 61,
+          "tokens_est": 73,
+          "blurb": "- **WHEN** `decisions.md` was committed by someone else between the page load and the answer - **THEN** the answer is not written, the ledger panel shows \"The l…"
+        }
+      ]
+    },
+    {
+      "path": "README.md",
+      "sha256": "c30923addf82a42fcc55b4575414daae04d2bfe93152bd3b55e73656f682c907",
+      "tokens_est": 2545,
+      "sections": [
+        {
+          "heading": "Checkpoint",
+          "level": 1,
+          "startLine": 1,
+          "endLine": 24,
+          "tokens_est": 308,
+          "blurb": "Checkpoint is the phone-sized inbox for the one decision an unattended Interlock run cannot make. `/interlock:spec` stops at a human read, and `interlock ready`…"
+        },
+        {
+          "heading": "Environment variables",
+          "level": 2,
+          "startLine": 25,
+          "endLine": 38,
+          "tokens_est": 310,
+          "blurb": "| Variable | Required | Meaning | |---|---|---| | `CHECKPOINT_ACCESS_KEY` | for any access | Shared access key exchanged at `/login` for a 30-day httpOnly sessi…"
+        },
+        {
+          "heading": "GitHub token scope",
+          "level": 2,
+          "startLine": 39,
+          "endLine": 51,
+          "tokens_est": 140,
+          "blurb": "Create a fine-grained personal access token at <https://github.com/settings/personal-access-tokens>: - **Repository access:** only the repository named in `CHEC…"
+        },
+        {
+          "heading": "Running locally",
+          "level": 2,
+          "startLine": 52,
+          "endLine": 80,
+          "tokens_est": 223,
+          "blurb": "Without a token, on the bundled fixture repository: npm install CHECKPOINT_GIT_HOST=fixture CHECKPOINT_ACCESS_KEY=dev npm run dev Open <http://localhost:3000>,…"
+        },
+        {
+          "heading": "Scripts",
+          "level": 3,
+          "startLine": 81,
+          "endLine": 93,
+          "tokens_est": 114,
+          "blurb": "| Script | What it does | |---|---| | `npm run dev` | Development server | | `npm run build` | Production build | | `npm run start` | Serve the production build…"
+        },
+        {
+          "heading": "Testing from your phone",
+          "level": 2,
+          "startLine": 94,
+          "endLine": 122,
+          "tokens_est": 307,
+          "blurb": "Checkpoint is built for a 375 px screen, so it is worth opening on a real one before deploying. The redirects it issues carry a relative `Location`, so sign-in…"
+        },
+        {
+          "heading": "then point any https tunnel (cloudflared, ngrok, tailscale funnel) at localhost:3000",
+          "level": 1,
+          "startLine": 123,
+          "endLine": 135,
+          "tokens_est": 159,
+          "blurb": "**Deployed.** See \"Deploying to Vercel\" below; the same phone flow applies with none of this setup. > **Why the LAN path uses the development server.** In produ…"
+        },
+        {
+          "heading": "Deploying to Vercel",
+          "level": 2,
+          "startLine": 136,
+          "endLine": 150,
+          "tokens_est": 145,
+          "blurb": "Checkpoint is a plain Next.js app with no Vercel-specific code. 1. Create a Vercel project from this repository. 2. Set the environment variables `CHECKPOINT_AC…"
+        },
+        {
+          "heading": "The `checkpoint.json` contract",
+          "level": 2,
+          "startLine": 151,
+          "endLine": 199,
+          "tokens_est": 499,
+          "blurb": "The sender (specflow's push) is assumed to write a `request` block before it pushes. The reader validates it with a tolerant schema, shows risk as `unobserved`…"
+        },
+        {
+          "heading": "Ledger fixtures",
+          "level": 2,
+          "startLine": 200,
+          "endLine": 219,
+          "tokens_est": 187,
+          "blurb": "`src/lib/ledger/ledger.ts` is a TypeScript port of Interlock's `lib/ledger.mjs`. Parity is pinned by golden files under `fixtures/ledger/`: for each hand-writte…"
+        },
+        {
+          "heading": "Open decision D1: how the app itself is gated",
+          "level": 2,
+          "startLine": 220,
+          "endLine": 230,
+          "tokens_est": 152,
+          "blurb": "`openspec/changes/build-checkpoint-reader/decisions.md` carries one `needs_human` row. The implemented default is a shared access key exchanged for an httpOnly,…"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "files": 8,
+    "sections": 119,
+    "tokens_est": 11268
+  }
+}

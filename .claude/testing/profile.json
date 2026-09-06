@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "updated": "2026-09-05T14:10:00Z",
+  "discovered_from": [
+    "package.json#scripts.test",
+    "package.json#scripts.test:e2e",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ],
+  "runner": "vitest",
+  "packageManager": "npm",
+  "unit": {
+    "command": "npm test",
+    "cwd": ".",
+    "filter_syntax": "npx vitest run -t \"<pattern>\"",
+    "single_file": "npx vitest run <path>",
+    "env": {},
+    "timeout_ms": 120000,
+    "prerequisites": [
+      "`npm install` once; Node >= 24 (package.json engines)."
+    ]
+  },
+  "e2e": {
+    "enabled": true,
+    "command": "npm run test:e2e",
+    "cwd": ".",
+    "filter_syntax": "npx playwright test -g \"<pattern>\"",
+    "single_file": "npx playwright test <path>",
+    "env": {},
+    "timeout_ms": 600000,
+    "prerequisites": [
+      "`npx playwright install chromium` once.",
+      "Binds port 3100; playwright.config.ts starts `next dev` on the fixture adapter itself, no token or network needed.",
+      "Must run with the Claude Code Bash sandbox disabled: the dev server and Turbopack bind local ports."
+    ]
+  },
+  "coverage": {
+    "enabled": false,
+    "command": null,
+    "report_path": null,
+    "format": null
+  },
+  "known_flaky": [],
+  "notes": [
+    "`npm test` (vitest, jsdom) and `npm run typecheck` run fine inside the Bash sandbox; `npm run build` and `npm run test:e2e` do not (port binding), see .claude/memory/failure-modes/.",
+    "A failed sandboxed `next build` poisons `.next`; run `rm -rf .next && npm run build` unsandboxed.",
+    "Baseline 2026-09-05: 22 files, 204 unit tests green; 1 e2e green; lint and typecheck clean."
+  ]
+}
