@@ -1,5 +1,7 @@
 # Checkpoint
 
+> **Status:** spike, in progress. The design below is settled; the integration lands with [Interlock](https://github.com/renzrollon/interlock).
+
 Checkpoint is the phone-sized inbox for the one decision an unattended
 Interlock run cannot make. `/interlock:spec` stops at a human read, and
 `interlock ready` refuses to continue while a `needs_human` row remains in a
