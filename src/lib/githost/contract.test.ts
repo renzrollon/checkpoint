@@ -166,6 +166,40 @@ function contractSuite(name: string, make: () => GitHost) {
       // Another ref still sees the disk content.
       expect((await host.readFile(CHECKPOINT, "other")).text).toBe(onDisk);
     });
+
+    it("compare: a descendant that only touched the decision file is ahead with that one path", async () => {
+      const a = (await host.resolveRef("main")).headSha;
+      const before = await host.readFile(CHECKPOINT, "main");
+      const w = await host.writeFile({ path: CHECKPOINT, ref: "main", content: "{}\n", message: "m", baseSha: before.sha });
+      expect(await host.compare(a, w.commitSha)).toEqual({ status: "ahead", files: [CHECKPOINT], truncated: false });
+    });
+
+    it("compare: lists each written path once across several writes, and reversed it is behind", async () => {
+      const a = (await host.resolveRef("main")).headSha;
+      const l = await host.readFile(LEDGER, "main");
+      await host.writeFile({ path: LEDGER, ref: "main", content: "one", message: "m", baseSha: l.sha });
+      const c = await host.readFile(CHECKPOINT, "main");
+      await host.writeFile({ path: CHECKPOINT, ref: "main", content: "{}", message: "m", baseSha: c.sha });
+      const l2 = await host.readFile(LEDGER, "main");
+      const last = await host.writeFile({ path: LEDGER, ref: "main", content: "two", message: "m", baseSha: l2.sha });
+      const ahead = await host.compare(a, last.commitSha);
+      expect(ahead.status).toBe("ahead");
+      expect([...ahead.files].sort()).toEqual([CHECKPOINT, LEDGER].sort());
+      const behind = await host.compare(last.commitSha, a);
+      expect(behind.status).toBe("behind");
+      expect([...behind.files].sort()).toEqual([CHECKPOINT, LEDGER].sort());
+    });
+
+    it("compare: a head with itself is identical with no paths", async () => {
+      const a = (await host.resolveRef("main")).headSha;
+      expect(await host.compare(a, a)).toEqual({ status: "identical", files: [], truncated: false });
+    });
+
+    it("compare: a commit the host never saw is not_found", async () => {
+      const a = (await host.resolveRef("main")).headSha;
+      await expectHostError(host.compare("f".repeat(40), a), "not_found");
+      await expectHostError(host.compare(a, "f".repeat(40)), "not_found");
+    });
   });
 }
 
@@ -207,6 +241,14 @@ describe("fixture adapter specifics", () => {
     host.reset();
     expect(host.overlay("main").size).toBe(0);
     expect((await host.readFile(LEDGER, "main")).text).toBe(file.text);
+  });
+
+  it("reset clears the head history", async () => {
+    const a = (await host.resolveRef("main")).headSha;
+    const file = await host.readFile(CHECKPOINT, "main");
+    const w = await host.writeFile({ path: CHECKPOINT, ref: "main", content: "{}", message: "m", baseSha: file.sha });
+    host.reset();
+    await expect(host.compare(a, w.commitSha)).rejects.toMatchObject({ kind: "not_found" });
   });
 
   it("a written file appears in directory listings", async () => {

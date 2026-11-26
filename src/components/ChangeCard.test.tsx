@@ -32,12 +32,24 @@ function entry(over: Partial<InboxEntry> = {}): InboxEntry {
 
 describe("ChangeCard", () => {
   it("shows name, ledger status, tasks with denominator and waves", () => {
-    render(<ul><ChangeCard entry={entry()} refName="main" /></ul>);
-    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("add-user-auth");
+    render(
+      <ul>
+        <ChangeCard
+          entry={entry()}
+          repo="renzrollon/interlock"
+          refName="main"
+        />
+      </ul>,
+    );
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+      "add-user-auth",
+    );
     expect(screen.getByText("1 needs you")).toBeTruthy();
     expect(byFullText("4 of 12 tasks · 3 waves")).toBeTruthy();
     expect(screen.queryByText("approved")).toBeNull();
-    expect(screen.getByRole("link").getAttribute("href")).toBe("/changes/add-user-auth?ref=main");
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      "/changes/add-user-auth?repo=renzrollon%2Finterlock&ref=main",
+    );
     expect(screen.getByRole("link").className).toContain("card-blocking");
   });
 
@@ -47,11 +59,20 @@ describe("ChangeCard", () => {
         <ChangeCard
           entry={entry({
             name: "add-report-flag",
-            ledger: { status: "clear", statusText: "clear", summary: { ...entry().ledger.summary, needsHuman: 0, blocking: false } },
+            ledger: {
+              status: "clear",
+              statusText: "clear",
+              summary: {
+                ...entry().ledger.summary,
+                needsHuman: 0,
+                blocking: false,
+              },
+            },
             tasks: { done: 5, total: 5, waves: 2 },
             decision: "approved",
             blocking: false,
           })}
+          repo="renzrollon/interlock"
           refName="feat/auth"
         />
       </ul>,
@@ -59,14 +80,23 @@ describe("ChangeCard", () => {
     expect(screen.getByText("clear")).toBeTruthy();
     expect(screen.getByText("approved")).toBeTruthy();
     expect(screen.getByRole("link").className).not.toContain("card-blocking");
-    expect(screen.getByRole("link").getAttribute("href")).toBe("/changes/add-report-flag?ref=feat%2Fauth");
+    expect(screen.getByRole("link").getAttribute("href")).toBe(
+      "/changes/add-report-flag?repo=renzrollon%2Finterlock&ref=feat%2Fauth",
+    );
   });
 
   it("shows a missing ledger as text", () => {
     render(
       <ul>
         <ChangeCard
-          entry={entry({ ledger: { status: "missing", statusText: "ledger missing", summary: { ...entry().ledger.summary, missing: true } } })}
+          entry={entry({
+            ledger: {
+              status: "missing",
+              statusText: "ledger missing",
+              summary: { ...entry().ledger.summary, missing: true },
+            },
+          })}
+          repo="renzrollon/interlock"
           refName="main"
         />
       </ul>,

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LedgerRow, LedgerSummary } from "@/lib/ledger/ledger";
 import type { AnswerResult } from "@/lib/change/actions";
 import { ledgerStatusFrom, type LedgerStatus } from "@/lib/change/ledger-status";
-import type { Unauthenticated } from "@/app/changes/[name]/actions";
+import type { RepoRefusal, Unauthenticated } from "@/app/changes/[name]/actions";
 import { AnswerForm, type AnswerSubmit } from "./AnswerForm";
 
 /**
@@ -21,11 +21,17 @@ export interface LedgerState {
   rows: LedgerRow[];
   summary: LedgerSummary;
   blockingReason: string | null;
+  /** Ids of needs_human rows design.md does not mention. */
+  unreferenced: string[];
   /** Blob SHA of the decisions.md these rows came from; null when missing. */
   sha: string | null;
 }
 
 export interface LedgerPanelProps {
+  /** Canonical repository the page was rendered for. */
+  repo: string;
+  /** Head SHA the page was rendered from (design D23). */
+  headSha: string | null;
   refName: string;
   change: string;
   ledger: LedgerState;
@@ -41,7 +47,9 @@ export function classLabel(row: LedgerRow): "needs you" | "resolved" | "invalid"
 
 export const SESSION_ENDED = "Your session has ended; sign in again";
 
-export function LedgerPanel({ refName, change, ledger: initial, submit, onLedgerChange }: LedgerPanelProps) {
+export const BRANCH_MOVED = "the branch also moved, reload the page before approving";
+
+export function LedgerPanel({ repo, headSha, refName, change, ledger: initial, submit, onLedgerChange }: LedgerPanelProps) {
   const [ledger, setLedger] = useState<LedgerState>(initial);
   const [message, setMessage] = useState<string | null>(null);
   const status = useRef<HTMLParagraphElement>(null);
@@ -55,14 +63,19 @@ export function LedgerPanel({ refName, change, ledger: initial, submit, onLedger
     onLedgerChange?.(next, headSha);
   }
 
-  function onResult(result: AnswerResult | Unauthenticated, row: LedgerRow) {
+  function onResult(result: AnswerResult | Unauthenticated | RepoRefusal, row: LedgerRow) {
     if (result.ok) {
       const { status: s, statusText } = ledgerStatusFrom(result.summary);
       update(
-        { status: s, statusText, rows: result.rows, summary: result.summary, blockingReason: result.blockingReason, sha: result.sha },
-        result.headSha,
+        { status: s, statusText, rows: result.rows, summary: result.summary, blockingReason: result.blockingReason, unreferenced: result.unreferenced, sha: result.sha },
+        // A moved branch keeps the page head (design D23): the owner must reload.
+        result.moved ? null : result.headSha,
       );
-      setMessage(`${row.id} answered and committed to ${refName}`);
+      setMessage(
+        result.moved
+          ? `${row.id} answered and committed to ${refName}; ${BRANCH_MOVED}`
+          : `${row.id} answered and committed to ${refName}`,
+      );
       return;
     }
     if (result.reason === "conflict") {
@@ -74,6 +87,7 @@ export function LedgerPanel({ refName, change, ledger: initial, submit, onLedger
           rows: result.reloaded.rows,
           summary: result.reloaded.summary,
           blockingReason: result.reloaded.blockingReason,
+          unreferenced: result.reloaded.unreferenced,
           sha: result.reloaded.sha,
         },
         null,
@@ -120,9 +134,12 @@ export function LedgerPanel({ refName, change, ledger: initial, submit, onLedger
                 {label === "needs you" ? (
                   <AnswerForm
                     row={row}
+                    repo={repo}
+                    headSha={headSha}
                     refName={refName}
                     change={change}
                     baseSha={ledger.sha}
+                    unreferenced={ledger.unreferenced.includes(row.id)}
                     submit={submit}
                     onResult={(result) => onResult(result, row)}
                   />

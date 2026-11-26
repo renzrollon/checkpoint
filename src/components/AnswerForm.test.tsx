@@ -6,7 +6,8 @@ import { AnswerForm } from "./AnswerForm";
 
 const ROW: LedgerRow = {
   id: "D1",
-  question: "How is the app gated: a session cookie, Vercel Deployment Protection, or Cloudflare Access?",
+  question:
+    "How is the app gated: a session cookie, Vercel Deployment Protection, or Cloudflare Access?",
   class: "needs_human",
   resolution: "",
   evidence: "",
@@ -17,13 +18,47 @@ const ROW: LedgerRow = {
 };
 
 function renderForm(over: Partial<Parameters<typeof AnswerForm>[0]> = {}) {
-  const submit = vi.fn(async () => ({ ok: false as const, reason: "not_found" as const, message: "no" }));
+  const submit = vi.fn(async () => ({
+    ok: false as const,
+    reason: "not_found" as const,
+    message: "no",
+  }));
   const onResult = vi.fn();
-  render(<AnswerForm row={ROW} refName="main" change="add-user-auth" baseSha="abc123" submit={submit} onResult={onResult} {...over} />);
+  render(
+    <AnswerForm
+      row={ROW}
+      repo="renzrollon/interlock"
+      headSha="h1"
+      refName="main"
+      change="add-user-auth"
+      baseSha="abc123"
+      submit={submit}
+      onResult={onResult}
+      {...over}
+    />,
+  );
   return { submit, onResult };
 }
 
 describe("AnswerForm", () => {
+  it("warns above submit when design.md does not mention the row, and still submits", async () => {
+    const user = userEvent.setup();
+    const { submit } = renderForm({ unreferenced: true });
+    expect(
+      screen.getByText(
+        "design.md does not mention D1; after this answer the laptop reads the row as invalid until the design references it",
+      ),
+    ).toBeTruthy();
+    await user.type(screen.getByLabelText("Your answer"), "Cloudflare Access");
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no reference warning when the design mentions the row", () => {
+    renderForm({ unreferenced: false });
+    expect(screen.queryByText(/design\.md does not mention/)).toBeNull();
+  });
+
   it("refuses a blank answer and sends nothing", async () => {
     const user = userEvent.setup();
     const { submit } = renderForm();
@@ -37,19 +72,39 @@ describe("AnswerForm", () => {
     const user = userEvent.setup();
     renderForm();
     const chips = screen.getAllByRole("button", { pressed: false });
-    expect(chips.map((c) => c.textContent)).toEqual(["a session cookie", "Vercel Deployment Protection", "Cloudflare Access"]);
+    expect(chips.map((c) => c.textContent)).toEqual([
+      "a session cookie",
+      "Vercel Deployment Protection",
+      "Cloudflare Access",
+    ]);
     await user.click(screen.getByRole("button", { name: "Cloudflare Access" }));
-    expect((screen.getByLabelText("Your answer") as HTMLInputElement).value).toBe("Cloudflare Access");
-    expect(screen.getByRole("button", { name: "Cloudflare Access" }).getAttribute("aria-pressed")).toBe("true");
+    expect(
+      (screen.getByLabelText("Your answer") as HTMLInputElement).value,
+    ).toBe("Cloudflare Access");
+    expect(
+      screen
+        .getByRole("button", { name: "Cloudflare Access" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 
   it("offers no chips when the question has no candidates and still accepts free text", async () => {
     const user = userEvent.setup();
-    const { submit, onResult } = renderForm({ row: { ...ROW, question: "Which cookie name?" } });
+    const { submit, onResult } = renderForm({
+      row: { ...ROW, question: "Which cookie name?" },
+    });
     expect(screen.queryAllByRole("button", { pressed: false })).toHaveLength(0);
     await user.type(screen.getByLabelText("Your answer"), "  cp_session  ");
     await user.click(screen.getByRole("button", { name: "Answer" }));
-    expect(submit).toHaveBeenCalledWith({ ref: "main", change: "add-user-auth", id: "D1", answer: "cp_session", baseSha: "abc123" });
+    expect(submit).toHaveBeenCalledWith({
+      repo: "renzrollon/interlock",
+      headSha: "h1",
+      ref: "main",
+      change: "add-user-auth",
+      id: "D1",
+      answer: "cp_session",
+      baseSha: "abc123",
+    });
     expect(onResult).toHaveBeenCalled();
   });
 
@@ -58,6 +113,11 @@ describe("AnswerForm", () => {
     const { submit } = renderForm({ baseSha: "deadbeef" });
     await user.click(screen.getByRole("button", { name: "a session cookie" }));
     await user.click(screen.getByRole("button", { name: "Answer" }));
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ answer: "a session cookie", baseSha: "deadbeef" }));
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answer: "a session cookie",
+        baseSha: "deadbeef",
+      }),
+    );
   });
 });

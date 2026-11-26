@@ -31,7 +31,7 @@ export function failingHost(shape: HostErrorShape, name = "github"): GitHost {
   const fail = async () => {
     throw new HostError(shape);
   };
-  return { name, resolveRef: fail, readFile: fail, listDir: fail, writeFile: fail };
+  return { name, resolveRef: fail, readFile: fail, listDir: fail, writeFile: fail, compare: fail };
 }
 
 export const FIXTURE_DIR = join(process.cwd(), "fixtures", "repo");

@@ -6,3 +6,5 @@ tags: [next, redirect, access-gate, lan]
 ---
 
 Next derives `request.url` from the address the server is bound to, not the `Host` the client sent (`-H 0.0.0.0` reports `http://0.0.0.0:<port>`, a tunnel reports `http://localhost:3000`, and `X-Forwarded-Host` is ignored), so any `Location` built with `new URL(path, request.url)` sends a phone on the LAN to an address it cannot reach — use `redirectToPath` in `src/lib/auth/redirect.ts`, which emits a relative `Location` (`NextResponse.redirect` refuses one).
+
+**Except in `src/proxy.ts`** (updated 2026-10-31, use-checkpoint-from-phone): Next 16.3's proxy adapter parses `Location` with `new URL()` and no base, so a relative one 500s every signed-out page request ("TypeError: Invalid URL"). Unit tests call `proxy()` directly and never see it. In the proxy, use `NextResponse.redirect(new URL(path, request.nextUrl))`. The adapter relativizes any `Location` on the request's host, so the wire value stays relative. Use `redirectToPath` only in route handlers.

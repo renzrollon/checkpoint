@@ -3,6 +3,7 @@ import { shortSha } from "@/lib/checkpoint/checkpoint";
 import type { LedgerSummary } from "@/lib/ledger/ledger";
 import type { LedgerStatus } from "@/lib/change/ledger-status";
 import { formatUtc, plural } from "@/lib/format";
+import { locationHref } from "@/lib/repo";
 
 /**
  * The change page header (change-reading spec, "Header with counts and
@@ -12,6 +13,10 @@ import { formatUtc, plural } from "@/lib/format";
 
 export interface ChangeHeaderProps {
   name: string;
+  /** Canonical repository; carried by the Inbox link. */
+  repo: string;
+  /** Show the repository, true when more than one is configured. */
+  showRepo: boolean;
   refName: string;
   headSha: string;
   tasks: { done: number; total: number; waves: number };
@@ -53,7 +58,7 @@ function Reading({ label, value, denominator, title }: { label: string; value: s
   );
 }
 
-export function ChangeHeader({ name, refName, headSha, tasks, ledger, risk, decision }: ChangeHeaderProps) {
+export function ChangeHeader({ name, repo, showRepo, refName, headSha, tasks, ledger, risk, decision }: ChangeHeaderProps) {
   const riskText = riskReading(risk);
   const decided = decisionLine(decision);
   return (
@@ -61,8 +66,10 @@ export function ChangeHeader({ name, refName, headSha, tasks, ledger, risk, deci
       <div className="change-header-top">
         <h1 className="page-title">{name}</h1>
         <p className="ref-line">
+          {showRepo ? <span>{repo}</span> : null}
           <span>{refName}</span>
           <span>{shortSha(headSha)}</span>
+          <a href={locationHref("/", { repo, ref: refName })}>Inbox</a>
         </p>
       </div>
       <div className="readings">

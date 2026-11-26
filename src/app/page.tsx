@@ -1,17 +1,14 @@
-import { getHost, isHostError } from "@/lib/githost";
+import { isHostError } from "@/lib/githost";
 import { listChanges, type Inbox } from "@/lib/change/load";
 import { ChangeCard } from "@/components/ChangeCard";
+import { ConfigError } from "@/components/ConfigError";
+import { UnknownRepo } from "@/components/UnknownRepo";
+import { InboxControls } from "@/components/InboxControls";
+import { resolvePageContext, type SearchParams } from "@/lib/page-context";
+import { Chrome } from "@/components/Chrome";
 import { HostError } from "@/components/HostError";
 
 export const dynamic = "force-dynamic";
-
-type Search = Record<string, string | string[] | undefined>;
-
-function refParam(params: Search): string | null {
-  const raw = params.ref;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  return value && value.trim() ? value.trim() : null;
-}
 
 function hostLabel(name: string): string {
   return name === "fixture" ? "Fixture" : "GitHub";
@@ -22,46 +19,88 @@ function hostLabel(name: string): string {
  * first. A failed read is named with a retry control and never renders as
  * an empty inbox.
  */
-export default async function InboxPage({ searchParams }: { searchParams: Promise<Search> }) {
-  const requestedRef = refParam(await searchParams);
-  const host = getHost();
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const ctx = resolvePageContext(await searchParams);
+  if (ctx.kind === "config") return ConfigError({ missing: ctx.missing });
+  if (ctx.kind === "unknown_repo")
+    return UnknownRepo({ requested: ctx.requested, repos: ctx.repos });
+  const { host, repo, repos } = ctx;
+  const requestedRef = ctx.ref;
+  const header = (refName: string) => (
+    <InboxHeader refName={refName} repo={repo} repos={repos} />
+  );
   let inbox: Inbox;
   try {
     inbox = await listChanges(host, requestedRef);
   } catch (e) {
     if (!isHostError(e)) throw e;
     return (
-      <main className="inbox">
-        <InboxHeader refName={requestedRef ?? e.ref ?? "the default branch"} />
-        <HostError error={e.toJSON()} refName={requestedRef} hostName={hostLabel(host.name)} placement="inbox" />
-      </main>
+      <>
+        {await Chrome({ repo, ref: requestedRef ?? undefined })}
+        <main className="inbox">
+          {header(requestedRef ?? e.ref ?? "the default branch")}
+          <HostError
+            error={e.toJSON()}
+            refName={requestedRef}
+            hostName={hostLabel(host.name)}
+            placement="inbox"
+          />
+        </main>
+      </>
     );
   }
 
   return (
-    <main className="inbox">
-      <InboxHeader refName={inbox.ref} />
-      {inbox.entries.length === 0 ? (
-        <p className="empty">No active changes on {inbox.ref}</p>
-      ) : (
-        <ul className="card-list">
-          {inbox.entries.map((entry) => (
-            <ChangeCard key={entry.name} entry={entry} refName={inbox.ref} />
-          ))}
-        </ul>
-      )}
-    </main>
+    <>
+      {await Chrome({ repo, ref: inbox.ref })}
+      <main className="inbox">
+        {header(inbox.ref)}
+        {inbox.entries.length === 0 ? (
+          <p className="empty">No active changes on {inbox.ref}</p>
+        ) : (
+          <ul className="card-list">
+            {inbox.entries.map((entry) => (
+              <ChangeCard
+                key={entry.name}
+                entry={entry}
+                repo={repo}
+                refName={inbox.ref}
+              />
+            ))}
+          </ul>
+        )}
+      </main>
+    </>
   );
 }
 
-function InboxHeader({ refName }: { refName: string }) {
+function InboxHeader({
+  refName,
+  repo,
+  repos,
+}: {
+  refName: string;
+  repo: string;
+  repos: readonly string[];
+}) {
   return (
     <header className="inbox-header">
       <h1 className="page-title">Checkpoint</h1>
+      {repos.length > 1 ? (
+        <p className="ref-line">
+          <span className="label">Repository</span>
+          <span>{repo}</span>
+        </p>
+      ) : null}
       <p className="ref-line">
         <span className="label">Ref</span>
         <span>{refName}</span>
       </p>
+      <InboxControls repo={repo} repos={repos} />
     </header>
   );
 }

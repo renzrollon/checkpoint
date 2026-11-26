@@ -119,7 +119,7 @@ function normalizeClass(value: unknown): string {
 
 const HEADING = /^#\s*Decisions\s*[—–:-]\s*(.+?)\s*$/;
 
-function referenceResolves(id: string, designText: string | null | undefined): boolean {
+export function referenceResolves(id: string, designText: string | null | undefined): boolean {
   if (typeof designText !== "string" || !designText.trim()) return false;
   const token = String(id).trim();
   if (!token) return false;

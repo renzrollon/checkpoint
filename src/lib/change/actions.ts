@@ -3,13 +3,23 @@ import { changeFilePath } from "@/lib/githost/guard";
 import {
   decisionView,
   readCheckpoint,
+  shortSha,
   serializeCheckpoint,
   withDecision,
   type Checkpoint,
   type DecisionView,
 } from "@/lib/checkpoint/checkpoint";
 import { answerRow as answerLedgerRow, type LedgerRow, type LedgerSummary } from "@/lib/ledger/ledger";
-import { ledgerViewFrom, checkpointViewFrom, type Artifact, type LedgerView } from "./load";
+import { classifyFreshness } from "@/lib/checkpoint/freshness";
+import {
+  advancePageHead,
+  checkpointViewFrom,
+  compareOrNull,
+  freshnessFor,
+  ledgerViewFrom,
+  type Artifact,
+  type LedgerView,
+} from "./load";
 
 /**
  * The two writes the reader performs (ledger-answering and
@@ -28,6 +38,8 @@ export interface AnswerInput {
   baseSha: string | null;
   /** UTC date for the evidence cell (design D13). */
   today: Date | string;
+  /** Head SHA the page was rendered from (design D23). Omitted: the page head is left alone. */
+  headSha?: string | null;
 }
 
 export interface ReloadedLedger {
@@ -37,6 +49,7 @@ export interface ReloadedLedger {
   summary: LedgerSummary;
   statusText: string;
   blockingReason: string | null;
+  unreferenced: string[];
 }
 
 export type AnswerResult =
@@ -46,10 +59,14 @@ export type AnswerResult =
       text: string;
       sha: string;
       commitSha: string;
-      headSha: string;
+      /** The advanced page head, or the page head when the branch also moved; null when none was given. */
+      headSha: string | null;
+      /** True when the branch moved past the page head by more than Checkpoint's own files. */
+      moved: boolean;
       rows: LedgerRow[];
       summary: LedgerSummary;
       blockingReason: string | null;
+      unreferenced: string[];
     }
   | { ok: false; reason: "blank_answer" | "not_needs_human" | "not_found" | "unparseable" | "missing"; message: string }
   | { ok: false; reason: "conflict"; message: string; reloaded: ReloadedLedger }
@@ -66,12 +83,17 @@ async function readArtifact(host: GitHost, path: string, ref: string): Promise<A
   }
 }
 
-async function ledgerOnRef(host: GitHost, change: string, ref: string): Promise<LedgerView> {
+async function ledgerAndDesign(host: GitHost, change: string, ref: string) {
   const [ledger, design] = await Promise.all([
     readArtifact(host, changeFilePath(change, "decisions.md"), ref),
     readArtifact(host, changeFilePath(change, "design.md"), ref),
   ]);
-  return ledgerViewFrom(ledger, design.missing ? null : design.text);
+  return { ledger, designText: design.missing ? null : design.text };
+}
+
+async function ledgerOnRef(host: GitHost, change: string, ref: string): Promise<LedgerView> {
+  const { ledger, designText } = await ledgerAndDesign(host, change, ref);
+  return ledgerViewFrom(ledger, designText);
 }
 
 function reloadedFrom(view: LedgerView): ReloadedLedger {
@@ -82,6 +104,7 @@ function reloadedFrom(view: LedgerView): ReloadedLedger {
     summary: view.summary,
     statusText: view.statusText,
     blockingReason: view.blockingReason,
+    unreferenced: view.unreferenced,
   };
 }
 
@@ -94,7 +117,8 @@ function hostFailure(e: unknown): { ok: false; reason: "host"; message: string; 
 export async function answerRow(host: GitHost, input: AnswerInput): Promise<AnswerResult> {
   const path = changeFilePath(input.change, "decisions.md");
   try {
-    const fresh = await ledgerOnRef(host, input.change, input.ref);
+    const { ledger, designText } = await ledgerAndDesign(host, input.change, input.ref);
+    const fresh = ledgerViewFrom(ledger, designText);
     if (fresh.missing || fresh.text === null) {
       return { ok: false, reason: "missing", message: `decisions.md is missing on ${input.ref}` };
     }
@@ -134,20 +158,23 @@ export async function answerRow(host: GitHost, input: AnswerInput): Promise<Answ
 
     const after = ledgerViewFrom(
       { file: "decisions.md", text: edited.text, sha: written.sha, missing: false },
-      // The design text did not change; re-read it for the reference audit.
-      (await readArtifact(host, changeFilePath(input.change, "design.md"), input.ref)).text,
+      designText,
     );
     const head = await host.resolveRef(input.ref);
+    const pageHead = input.headSha ?? null;
+    const advanced = pageHead === null ? null : await advancePageHead(host, input.change, pageHead, head.headSha);
     return {
       ok: true,
       row: edited.row,
       text: edited.text,
       sha: written.sha,
       commitSha: written.commitSha,
-      headSha: head.headSha,
+      headSha: advanced,
+      moved: advanced !== null && advanced !== head.headSha,
       rows: after.rows,
       summary: after.summary,
       blockingReason: after.blockingReason,
+      unreferenced: after.unreferenced,
     };
   } catch (e) {
     const failure = hostFailure(e);
@@ -180,22 +207,24 @@ export interface ReloadedCheckpoint {
 export type DecideResult =
   | { ok: true; decision: DecisionView; checkpoint: Checkpoint; sha: string; commitSha: string; headSha: string }
   | { ok: false; reason: "note_required"; message: string }
+  | { ok: false; reason: "moved"; message: string }
   | { ok: false; reason: "ledger_blocks"; message: string; detail: string }
   | { ok: false; reason: "checkpoint_unreadable"; message: string }
   | { ok: false; reason: "conflict"; message: string; reloaded: ReloadedCheckpoint }
   | { ok: false; reason: "host"; message: string; error: HostErrorShape };
 
-async function checkpointReload(host: GitHost, change: string, ref: string): Promise<ReloadedCheckpoint> {
+async function checkpointReload(host: GitHost, change: string, ref: string, pageHead: string): Promise<ReloadedCheckpoint> {
   const file = await readArtifact(host, changeFilePath(change, "checkpoint.json"), ref);
   const view = checkpointViewFrom(file);
   const head = await host.resolveRef(ref);
+  const lookup = await freshnessFor(host, view.value, head.headSha, change);
   return {
     text: view.text,
     sha: view.sha,
     present: view.present,
     problem: view.problem,
-    decision: decisionView(view.value, head.headSha),
-    headSha: head.headSha,
+    decision: decisionView(view.value, head.headSha, lookup),
+    headSha: await advancePageHead(host, change, pageHead, head.headSha),
   };
 }
 
@@ -209,6 +238,27 @@ export async function decide(host: GitHost, input: DecideInput): Promise<DecideR
   const conflictMessage = `The decision file changed on ${input.ref}; reloaded`;
 
   try {
+    // The owner may only certify what the owner read (design D22): when the
+    // branch moved past the page head by anything but Checkpoint's own files,
+    // nothing is written and the page must reload.
+    const current = await host.resolveRef(input.ref);
+    if (current.headSha !== input.headSha) {
+      const comparison = await compareOrNull(host, input.headSha, current.headSha);
+      const verdict = classifyFreshness({
+        recordedHead: input.headSha,
+        currentHead: current.headSha,
+        comparison,
+        change: input.change,
+      });
+      if (verdict === "stale") {
+        return {
+          ok: false,
+          reason: "moved",
+          message: `The branch moved past ${shortSha(input.headSha)}; reload to read it`,
+        };
+      }
+    }
+
     if (input.state === "approved") {
       const ledger = await ledgerOnRef(host, input.change, input.ref);
       if (ledger.summary.blocking) {
@@ -223,7 +273,7 @@ export async function decide(host: GitHost, input: DecideInput): Promise<DecideR
 
     const existing = await readArtifact(host, path, input.ref);
     if (existing.sha !== input.baseSha) {
-      return { ok: false, reason: "conflict", message: conflictMessage, reloaded: await checkpointReload(host, input.change, input.ref) };
+      return { ok: false, reason: "conflict", message: conflictMessage, reloaded: await checkpointReload(host, input.change, input.ref, input.headSha) };
     }
     const read = readCheckpoint(existing.missing ? null : existing.text);
     if (read.present && !read.checkpoint) {
@@ -234,13 +284,12 @@ export async function decide(host: GitHost, input: DecideInput): Promise<DecideR
       };
     }
 
-    const head = await host.resolveRef(input.ref);
     const decidedAt = typeof input.now === "string" ? input.now : input.now.toISOString();
     const next = withDecision(read.checkpoint, input.change, {
       state: input.state,
       note,
       decidedAt,
-      headSha: head.headSha,
+      headSha: input.headSha,
     });
 
     let written;
@@ -254,18 +303,19 @@ export async function decide(host: GitHost, input: DecideInput): Promise<DecideR
       });
     } catch (e) {
       if (isHostError(e) && e.kind === "conflict") {
-        return { ok: false, reason: "conflict", message: conflictMessage, reloaded: await checkpointReload(host, input.change, input.ref) };
+        return { ok: false, reason: "conflict", message: conflictMessage, reloaded: await checkpointReload(host, input.change, input.ref, input.headSha) };
       }
       throw e;
     }
 
+    const lookup = await freshnessFor(host, next, written.commitSha, input.change);
     return {
       ok: true,
-      decision: decisionView(next, head.headSha),
+      decision: decisionView(next, written.commitSha, lookup),
       checkpoint: next,
       sha: written.sha,
       commitSha: written.commitSha,
-      headSha: head.headSha,
+      headSha: await advancePageHead(host, input.change, input.headSha, written.commitSha),
     };
   } catch (e) {
     const failure = hostFailure(e);

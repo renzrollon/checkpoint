@@ -1,8 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LedgerSummary } from "@/lib/ledger/ledger";
 import { byFullText } from "@/test/dom";
-import { ChangeHeader, ledgerLine, type ChangeHeaderProps } from "./ChangeHeader";
+import {
+  ChangeHeader,
+  ledgerLine,
+  type ChangeHeaderProps,
+} from "./ChangeHeader";
 
 const HEAD = "cd77a9bbd44319ca73e560cc2a0016048c83448d";
 const OLD = "0123456789abcdef0123456789abcdef01234567";
@@ -26,6 +30,8 @@ function summary(over: Partial<LedgerSummary> = {}): LedgerSummary {
 function props(over: Partial<ChangeHeaderProps> = {}): ChangeHeaderProps {
   return {
     name: "add-user-auth",
+    repo: "renzrollon/interlock",
+    showRepo: false,
     refName: "feat/auth",
     headSha: HEAD,
     tasks: { done: 4, total: 12, waves: 3 },
@@ -39,12 +45,16 @@ function props(over: Partial<ChangeHeaderProps> = {}): ChangeHeaderProps {
 describe("ChangeHeader", () => {
   it("shows name, ref, short sha, counts with denominators and the ledger line", () => {
     render(<ChangeHeader {...props()} />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("add-user-auth");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "add-user-auth",
+    );
     expect(screen.getByText("feat/auth")).toBeTruthy();
     expect(screen.getByText("cd77a9b")).toBeTruthy();
     expect(byFullText("Tasks done4 of 12tasks")).toBeTruthy();
     expect(byFullText("Waves3waves")).toBeTruthy();
-    expect(screen.getByText("1 needs you, 3 resolved, 1 invalid, of 5 rows")).toBeTruthy();
+    expect(
+      screen.getByText("1 needs you, 3 resolved, 1 invalid, of 5 rows"),
+    ).toBeTruthy();
     expect(screen.queryByText(/approved|returned/)).toBeNull();
   });
 
@@ -56,7 +66,17 @@ describe("ChangeHeader", () => {
 
   it("labels a risk recorded for an older head as stale", () => {
     render(
-      <ChangeHeader {...props({ risk: { state: "stale", class: "high", headSha: OLD, currentHeadSha: HEAD, signals: [] } })} />,
+      <ChangeHeader
+        {...props({
+          risk: {
+            state: "stale",
+            class: "high",
+            headSha: OLD,
+            currentHeadSha: HEAD,
+            signals: [],
+          },
+        })}
+      />,
     );
     expect(screen.getByText("risk high")).toBeTruthy();
     expect(screen.getByText("stale: recorded for 0123456")).toBeTruthy();
@@ -70,9 +90,22 @@ describe("ChangeHeader", () => {
   });
 
   it("writes a missing or unreadable ledger on the ledger line", () => {
-    expect(ledgerLine("missing", summary({ missing: true }))).toBe("ledger missing");
-    expect(ledgerLine("unparseable", summary({ unparseable: true }))).toBe("ledger unreadable");
-    render(<ChangeHeader {...props({ ledger: { status: "missing", summary: summary({ missing: true, total: 0 }) } })} />);
+    expect(ledgerLine("missing", summary({ missing: true }))).toBe(
+      "ledger missing",
+    );
+    expect(ledgerLine("unparseable", summary({ unparseable: true }))).toBe(
+      "ledger unreadable",
+    );
+    render(
+      <ChangeHeader
+        {...props({
+          ledger: {
+            status: "missing",
+            summary: summary({ missing: true, total: 0 }),
+          },
+        })}
+      />,
+    );
     expect(screen.getByText("ledger missing")).toBeTruthy();
   });
 
@@ -80,10 +113,39 @@ describe("ChangeHeader", () => {
     render(
       <ChangeHeader
         {...props({
-          decision: { state: "approved", note: "", decidedAt: "2026-09-04T19:30:00Z", decidedBy: "checkpoint", headSha: HEAD, currentHeadSha: HEAD, stale: false },
+          decision: {
+            state: "approved",
+            note: "",
+            decidedAt: "2026-09-04T19:30:00Z",
+            decidedBy: "checkpoint",
+            headSha: HEAD,
+            currentHeadSha: HEAD,
+            stale: false,
+          },
         })}
       />,
     );
-    expect(screen.getByText("approved · 2026-09-04 19:30 UTC · cd77a9b")).toBeTruthy();
+    expect(
+      screen.getByText("approved · 2026-09-04 19:30 UTC · cd77a9b"),
+    ).toBeTruthy();
+  });
+
+  it("shows the repository only when several are configured", () => {
+    render(<ChangeHeader {...props()} />);
+    expect(screen.queryByText("renzrollon/interlock")).toBeNull();
+    cleanup();
+    render(
+      <ChangeHeader
+        {...props({ repo: "renzrollon/checkpoint", showRepo: true })}
+      />,
+    );
+    expect(screen.getByText("renzrollon/checkpoint")).toBeTruthy();
+  });
+
+  it("links to the inbox for the same repository and ref", () => {
+    render(<ChangeHeader {...props({ refName: "carlrollon/sunstar" })} />);
+    expect(
+      screen.getByRole("link", { name: "Inbox" }).getAttribute("href"),
+    ).toBe("/?repo=renzrollon%2Finterlock&ref=carlrollon%2Fsunstar");
   });
 });

@@ -107,6 +107,9 @@ export function serializeCheckpoint(checkpoint: Checkpoint): string {
   return JSON.stringify(checkpoint, null, 2) + "\n";
 }
 
+/** Whether a recorded head still describes the branch (design D6); built by `freshnessFor`. */
+export type FreshnessLookup = (recordedHead: string) => "fresh" | "stale";
+
 export type RiskView =
   | { state: "observed"; class: RiskClass; headSha: string; signals: string[] }
   | { state: "stale"; class: RiskClass; headSha: string; currentHeadSha: string; signals: string[] }
@@ -121,14 +124,14 @@ function isRiskClass(v: unknown): v is RiskClass {
  * Interlock's vocabulary, is shown; anything else is `unobserved`, with the
  * raw value carried for a tooltip when there was one.
  */
-export function riskView(checkpoint: Checkpoint | null, headSha: string): RiskView {
+export function riskView(checkpoint: Checkpoint | null, headSha: string, freshness: FreshnessLookup): RiskView {
   const request = checkpoint?.request;
   const rawClass = request?.risk?.class;
   if (!request || rawClass === undefined || rawClass === null) return { state: "unobserved" };
   if (!isRiskClass(rawClass)) return { state: "unobserved", raw: String(rawClass) };
   const recorded = typeof request.headSha === "string" ? request.headSha : "";
   const signals = Array.isArray(request.risk?.signals) ? request.risk.signals : [];
-  if (recorded && recorded !== headSha) {
+  if (recorded && freshness(recorded) === "stale") {
     return { state: "stale", class: rawClass, headSha: recorded, currentHeadSha: headSha, signals };
   }
   return { state: "observed", class: rawClass, headSha: recorded || headSha, signals };
@@ -146,8 +149,8 @@ export type DecisionView =
       stale: boolean;
     };
 
-/** The current decision, flagged stale when the ref head has moved past it. */
-export function decisionView(checkpoint: Checkpoint | null, headSha: string): DecisionView {
+/** The current decision, flagged stale when the lookup reads its recorded head as stale. */
+export function decisionView(checkpoint: Checkpoint | null, headSha: string, freshness: FreshnessLookup): DecisionView {
   const d = checkpoint?.decision;
   if (!d) return { state: "none" };
   return {
@@ -157,7 +160,7 @@ export function decisionView(checkpoint: Checkpoint | null, headSha: string): De
     decidedBy: d.decidedBy,
     headSha: d.headSha,
     currentHeadSha: headSha,
-    stale: d.headSha !== headSha,
+    stale: freshness(d.headSha) === "stale",
   };
 }
 

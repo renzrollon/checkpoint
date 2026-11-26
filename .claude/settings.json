@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(interlock:*)",
+      "Bash(interlock-graph:*)",
+      "Bash(openspec:*)",
+      "Bash(git:*)",
+      "Bash(npm test:*)",
+      "Bash(node --test:*)",
+      "Bash(test:*)",
+      "Bash(printenv:*)",
+      "Bash(mkdir:*)",
+      "Bash(npx vitest run:*)",
+      "Bash(npm run test:e2e:*)",
+      "Bash(npx playwright test:*)"
+    ]
+  },
+  "worktree": { "bgIsolation": "none" }
+}

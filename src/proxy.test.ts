@@ -2,6 +2,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SESSION_COOKIE, makeSession } from "@/lib/auth/session";
+import { getRelativeURL } from "next/dist/shared/lib/router/utils/relativize-url";
 import { proxy } from "./proxy";
 
 const KEY = "the-access-key";
@@ -32,11 +33,29 @@ function clearedCookie(res: Response): boolean {
   return set.includes(`${SESSION_COOKIE}=`) && /max-age=0|expires=thu, 01 jan 1970/i.test(set);
 }
 
-/** A Location the browser resolves against its own origin: a path, never a URL. */
-function expectRelativeLocation(res: Response, expected: string) {
+/**
+ * The Location the client receives: Next's proxy adapter rewrites a redirect on
+ * the request's own host with this same `getRelativeURL` before it leaves the
+ * server (and crashes on a bare path, which is why the proxy hands it an
+ * absolute URL). The browser then resolves a path, never a URL.
+ */
+function wireLocation(res: Response, request: NextRequest): string | null {
   const location = res.headers.get("location");
+  if (location === null) return null;
+  expect(new URL(location).host).toBe(new URL(request.url).host);
+  return getRelativeURL(location, request.url);
+}
+
+function expectRelativeLocation(res: Response, expected: string, request: NextRequest) {
+  const location = wireLocation(res, request);
   expect(location).toBe(expected);
   expect(location).not.toContain("://");
+}
+
+/** Run the proxy and assert the wire Location in one step. */
+function redirected(request: NextRequest) {
+  const res = proxy(request);
+  return { res, expectLocation: (expected: string) => expectRelativeLocation(res, expected, request), wire: () => wireLocation(res, request) };
 }
 
 describe("proxy with a configured key", () => {
@@ -48,37 +67,53 @@ describe("proxy with a configured key", () => {
   });
 
   it("redirects an unauthenticated page request to login with next preserved", () => {
-    const res = proxy(req("/changes/add-user-auth"));
+    const { res, expectLocation } = redirected(req("/changes/add-user-auth"));
     expect(res.status).toBe(307);
-    expectRelativeLocation(res, "/login?next=%2Fchanges%2Fadd-user-auth");
+    expectLocation("/login?next=%2Fchanges%2Fadd-user-auth");
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 
   it("keeps the query string in next", () => {
-    const res = proxy(req("/changes/add-user-auth?ref=feat/auth"));
-    expectRelativeLocation(res, "/login?next=%2Fchanges%2Fadd-user-auth%3Fref%3Dfeat%2Fauth");
+    redirected(req("/changes/add-user-auth?ref=feat/auth")).expectLocation(
+      "/login?next=%2Fchanges%2Fadd-user-auth%3Fref%3Dfeat%2Fauth",
+    );
+  });
+
+  it("keeps a push link's repo and ref in next, encoded", () => {
+    const { res, expectLocation, wire } = redirected(
+      req("/changes/add-user-auth?repo=renzrollon%2Finterlock&ref=carlrollon%2Fsunstar"),
+    );
+    expect(res.status).toBe(307);
+    expectLocation("/login?next=%2Fchanges%2Fadd-user-auth%3Frepo%3Drenzrollon%252Finterlock%26ref%3Dcarlrollon%252Fsunstar");
+    const next = new URL(wire()!, ORIGIN).searchParams.get("next");
+    expect(next).toBe("/changes/add-user-auth?repo=renzrollon%2Finterlock&ref=carlrollon%2Fsunstar");
+  });
+
+  it("hands Next an absolute Location, which its adapter requires", () => {
+    const res = proxy(req("/changes/add-user-auth"));
+    expect(() => new URL(res.headers.get("location")!)).not.toThrow();
   });
 
   it("the redirect ignores the server's bind address", () => {
-    const plain = proxy(fromPhone("/changes/add-user-auth"));
-    expect(plain.status).toBe(307);
-    expectRelativeLocation(plain, "/login?next=%2Fchanges%2Fadd-user-auth");
+    const plain = redirected(fromPhone("/changes/add-user-auth"));
+    expect(plain.res.status).toBe(307);
+    plain.expectLocation("/login?next=%2Fchanges%2Fadd-user-auth");
 
-    const withQuery = proxy(fromPhone("/changes/add-user-auth?ref=feat/auth"));
-    expect(withQuery.status).toBe(307);
-    expectRelativeLocation(withQuery, "/login?next=%2Fchanges%2Fadd-user-auth%3Fref%3Dfeat%2Fauth");
+    const withQuery = redirected(fromPhone("/changes/add-user-auth?ref=feat/auth"));
+    expect(withQuery.res.status).toBe(307);
+    withQuery.expectLocation("/login?next=%2Fchanges%2Fadd-user-auth%3Fref%3Dfeat%2Fauth");
 
-    for (const res of [plain, withQuery]) {
-      expect(res.headers.get("location")).not.toContain("0.0.0.0");
-      expect(res.headers.get("location")).not.toContain(PHONE_HOST);
+    for (const r of [plain, withQuery]) {
+      expect(r.wire()).not.toContain("0.0.0.0");
+      expect(r.wire()).not.toContain(PHONE_HOST);
     }
   });
 
   it("stays relative behind a tunnel that reaches localhost", () => {
-    const res = proxy(fromPhone("/changes/add-user-auth", { origin: TUNNEL_BIND_ORIGIN }));
+    const { res, expectLocation, wire } = redirected(fromPhone("/changes/add-user-auth", { origin: TUNNEL_BIND_ORIGIN }));
     expect(res.status).toBe(307);
-    expectRelativeLocation(res, "/login?next=%2Fchanges%2Fadd-user-auth");
-    expect(res.headers.get("location")).not.toContain("localhost");
+    expectLocation("/login?next=%2Fchanges%2Fadd-user-auth");
+    expect(wire()).not.toContain("localhost");
   });
 
   it("answers 401 JSON for an unauthenticated API request", async () => {
@@ -100,9 +135,9 @@ describe("proxy with a configured key", () => {
   });
 
   it("clears a tampered cookie on the relative redirect too", () => {
-    const res = proxy(fromPhone("/changes/add-user-auth", { cookie: "v1.9999999999.deadbeef" }));
+    const { res, expectLocation } = redirected(fromPhone("/changes/add-user-auth", { cookie: "v1.9999999999.deadbeef" }));
     expect(res.status).toBe(307);
-    expectRelativeLocation(res, "/login?next=%2Fchanges%2Fadd-user-auth");
+    expectLocation("/login?next=%2Fchanges%2Fadd-user-auth");
     expect(clearedCookie(res)).toBe(true);
   });
 

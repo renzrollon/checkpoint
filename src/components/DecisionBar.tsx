@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { shortSha, type DecisionView } from "@/lib/checkpoint/checkpoint";
 import type { DecideResult } from "@/lib/change/actions";
-import type { DecideActionInput, Unauthenticated } from "@/app/changes/[name]/actions";
+import type { DecideActionInput, RepoRefusal, Unauthenticated } from "@/app/changes/[name]/actions";
 import { formatUtc } from "@/lib/format";
 import { SESSION_ENDED } from "./LedgerPanel";
 
@@ -14,9 +14,11 @@ import { SESSION_ENDED } from "./LedgerPanel";
  * A stale decision is named and Approve is offered again.
  */
 
-export type DecideSubmit = (input: DecideActionInput) => Promise<DecideResult | Unauthenticated>;
+export type DecideSubmit = (input: DecideActionInput) => Promise<DecideResult | Unauthenticated | RepoRefusal>;
 
 export interface DecisionBarProps {
+  /** Canonical repository the page was rendered for. */
+  repo: string;
   refName: string;
   change: string;
   /** Head SHA the page was rendered from. */
@@ -38,13 +40,17 @@ export function decisionText(decision: DecisionView): string | null {
   return decision.note ? `${line} · ${decision.note}` : line;
 }
 
+export function movedText(pageHead: string): string {
+  return `The branch moved past ${shortSha(pageHead)}; reload to read it`;
+}
+
 export function staleText(decision: DecisionView): string | null {
   if (decision.state === "none" || !decision.stale) return null;
   return `${decision.state} at ${shortSha(decision.headSha)}, branch has moved to ${shortSha(decision.currentHeadSha)}`;
 }
 
 export function DecisionBar(props: DecisionBarProps) {
-  const { refName, change, blockingReason, submit, onDecided } = props;
+  const { repo, refName, change, blockingReason, submit, onDecided } = props;
   const id = useId();
   const [decision, setDecision] = useState<DecisionView>(props.decision);
   const [headSha, setHeadSha] = useState(props.headSha);
@@ -54,6 +60,7 @@ export function DecisionBar(props: DecisionBarProps) {
   const [note, setNote] = useState("");
   const [noteError, setNoteError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [moved, setMoved] = useState(false);
   const status = useRef<HTMLParagraphElement>(null);
 
   // Follow the parent when it learns a new head, decision or blob SHA (an
@@ -71,7 +78,7 @@ export function DecisionBar(props: DecisionBarProps) {
 
   const blocked = blockingReason !== null;
 
-  function apply(result: DecideResult | Unauthenticated, verb: string) {
+  function apply(result: DecideResult | Unauthenticated | RepoRefusal, verb: string) {
     if (result.ok) {
       setDecision(result.decision);
       setHeadSha(result.headSha);
@@ -90,6 +97,13 @@ export function DecisionBar(props: DecisionBarProps) {
       onDecided?.(result.reloaded.decision, result.reloaded.headSha, result.reloaded.sha);
       return;
     }
+    if (result.reason === "moved") {
+      // Keep the page head and the note (design D22): a second tap is
+      // refused again until the page is reloaded.
+      setMoved(true);
+      setMessage(movedText(headSha));
+      return;
+    }
     if (result.reason === "note_required") {
       setNoteError(result.message);
       return;
@@ -105,7 +119,7 @@ export function DecisionBar(props: DecisionBarProps) {
     if (blocked || busy) return;
     setBusy(true);
     try {
-      apply(await submit({ ref: refName, change, state: "approved", baseSha, headSha }), "Approved");
+      apply(await submit({ repo, ref: refName, change, state: "approved", baseSha, headSha }), "Approved");
     } finally {
       setBusy(false);
     }
@@ -121,7 +135,7 @@ export function DecisionBar(props: DecisionBarProps) {
     setNoteError(null);
     setBusy(true);
     try {
-      apply(await submit({ ref: refName, change, state: "returned", note: trimmed, baseSha, headSha }), "Sent back");
+      apply(await submit({ repo, ref: refName, change, state: "returned", note: trimmed, baseSha, headSha }), "Sent back");
     } finally {
       setBusy(false);
     }
@@ -135,6 +149,11 @@ export function DecisionBar(props: DecisionBarProps) {
       <p ref={status} role="status" tabIndex={-1} className={message ? "reason status" : "sr-only status"}>
         {message ?? ""}
       </p>
+      {moved ? (
+        <button type="button" className="btn" onClick={() => window.location.reload()}>
+          Reload
+        </button>
+      ) : null}
       {current ? <p className="decision-line">{current}</p> : null}
       {stale ? <p className="decision-line">{stale}</p> : null}
       {blocked ? (

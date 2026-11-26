@@ -33,7 +33,7 @@ export default defineConfig({
     env: {
       CHECKPOINT_GIT_HOST: "fixture",
       CHECKPOINT_FIXTURE_DIR: "fixtures/repo",
-      CHECKPOINT_REPO: "fixture/repo",
+      CHECKPOINT_REPOS: "fixture/repo",
       CHECKPOINT_ACCESS_KEY: "e2e-access-key",
     },
     stdout: "pipe",

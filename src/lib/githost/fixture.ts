@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { HostError } from "./errors";
 import { guardWritePath } from "./guard";
-import type { DirEntry, FileRead, GitHost, RefInfo, WriteInput, WriteResult } from "./types";
+import type { Comparison, DirEntry, FileRead, GitHost, RefInfo, WriteInput, WriteResult } from "./types";
 
 /**
  * Fixture adapter (design D16): serves a directory tree as if it were one
@@ -17,6 +17,12 @@ export interface FixtureHostOptions {
   /** Directory served as the repository root. */
   dir: string;
   defaultBranch?: string;
+}
+
+/** One head a ref has had, and the path the write that produced it touched (null for the initial head). */
+interface HeadRecord {
+  head: string;
+  path: string | null;
 }
 
 interface OverlayEntry {
@@ -49,6 +55,7 @@ export function createFixtureHost(options: FixtureHostOptions): FixtureHost {
   const root = resolve(options.dir);
   const defaultBranch = options.defaultBranch ?? "main";
   const overlays = new Map<string, Map<string, OverlayEntry>>();
+  const history = new Map<string, HeadRecord[]>();
 
   function overlayFor(ref: string): Map<string, OverlayEntry> {
     let o = overlays.get(ref);
@@ -57,6 +64,16 @@ export function createFixtureHost(options: FixtureHostOptions): FixtureHost {
       overlays.set(ref, o);
     }
     return o;
+  }
+
+  /** The ref's head history, seeded with its current head the first time it is needed. */
+  function historyFor(ref: string): HeadRecord[] {
+    let h = history.get(ref);
+    if (!h) {
+      h = [{ head: headSha(ref), path: null }];
+      history.set(ref, h);
+    }
+    return h;
   }
 
   function diskPath(path: string): string {
@@ -91,6 +108,7 @@ export function createFixtureHost(options: FixtureHostOptions): FixtureHost {
 
     reset() {
       overlays.clear();
+      history.clear();
     },
 
     overlay(ref: string): ReadonlyMap<string, string> {
@@ -101,6 +119,7 @@ export function createFixtureHost(options: FixtureHostOptions): FixtureHost {
 
     async resolveRef(ref?: string | null): Promise<RefInfo> {
       const name = ref && ref.trim() ? ref.trim() : defaultBranch;
+      historyFor(name);
       return { ref: name, headSha: headSha(name) };
     },
 
@@ -151,8 +170,29 @@ export function createFixtureHost(options: FixtureHostOptions): FixtureHost {
         });
       }
       const sha = gitBlobSha(input.content);
+      const records = historyFor(input.ref);
       overlayFor(input.ref).set(input.path, { content: input.content, sha });
-      return { sha, commitSha: headSha(input.ref) };
+      const commitSha = headSha(input.ref);
+      if (records[records.length - 1].head !== commitSha) records.push({ head: commitSha, path: input.path });
+      return { sha, commitSha };
+    },
+
+    async compare(base: string, head: string): Promise<Comparison> {
+      const unknown = (sha: string) =>
+        new HostError({ kind: "not_found", message: `commit ${sha} is not known to the fixture adapter` });
+      const known = (sha: string) => [...history.values()].some((r) => r.some((x) => x.head === sha));
+      if (!known(base)) throw unknown(base);
+      if (!known(head)) throw unknown(head);
+      if (base === head) return { status: "identical", files: [], truncated: false };
+      for (const records of history.values()) {
+        const i = records.findIndex((r) => r.head === base);
+        const j = records.findIndex((r) => r.head === head);
+        if (i < 0 || j < 0) continue;
+        const [lo, hi] = i < j ? [i, j] : [j, i];
+        const files = [...new Set(records.slice(lo + 1, hi + 1).map((r) => r.path as string))];
+        return { status: i < j ? "ahead" : "behind", files, truncated: false };
+      }
+      return { status: "diverged", files: [], truncated: false };
     },
   };
 }

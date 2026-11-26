@@ -14,13 +14,14 @@ import { LedgerPanel, type LedgerState } from "./LedgerPanel";
  * decision bar share one view of the ledger and the head, so answering the
  * last `needs_human` row re-offers Approve without a reload.
  */
-export function ChangeWorkspace({ change }: { change: ChangeView }) {
+export function ChangeWorkspace({ change, repo, showRepo }: { change: ChangeView; repo: string; showRepo: boolean }) {
   const [ledger, setLedger] = useState<LedgerState>({
     status: change.ledger.status,
     statusText: change.ledger.statusText,
     rows: change.ledger.rows,
     summary: change.ledger.summary,
     blockingReason: change.ledger.blockingReason,
+    unreferenced: change.ledger.unreferenced,
     sha: change.ledger.sha,
   });
   const [headSha, setHeadSha] = useState(change.headSha);
@@ -31,6 +32,8 @@ export function ChangeWorkspace({ change }: { change: ChangeView }) {
     <main className="change-page">
       <ChangeHeader
         name={change.name}
+        repo={repo}
+        showRepo={showRepo}
         refName={change.ref}
         headSha={headSha}
         tasks={change.tasks}
@@ -44,6 +47,8 @@ export function ChangeWorkspace({ change }: { change: ChangeView }) {
         specs={change.specs}
         ledger={
           <LedgerPanel
+            repo={repo}
+            headSha={headSha}
             refName={change.ref}
             change={change.name}
             ledger={ledger}
@@ -56,6 +61,7 @@ export function ChangeWorkspace({ change }: { change: ChangeView }) {
         }
       />
       <DecisionBar
+        repo={repo}
         refName={change.ref}
         change={change.name}
         headSha={headSha}

@@ -40,6 +40,15 @@ export interface WriteResult {
   commitSha: string;
 }
 
+export interface Comparison {
+  /** `ahead`: head descends from base. `behind`: base descends from head. */
+  status: "ahead" | "identical" | "behind" | "diverged";
+  /** Repository-relative paths changed between the two; renames list both paths. */
+  files: string[];
+  /** True when the host capped the path list. */
+  truncated: boolean;
+}
+
 export interface GitHost {
   /** Which host this is, for display ("GitHub", "fixture"). */
   readonly name: string;
@@ -47,4 +56,6 @@ export interface GitHost {
   readFile(path: string, ref: string): Promise<FileRead>;
   listDir(path: string, ref: string): Promise<DirEntry[]>;
   writeFile(input: WriteInput): Promise<WriteResult>;
+  /** Compare two commit SHAs: how `head` relates to `base`, and the paths between them. */
+  compare(base: string, head: string): Promise<Comparison>;
 }
