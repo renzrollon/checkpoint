@@ -33,3 +33,6 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# interlock ship run state
+.claude/ship/

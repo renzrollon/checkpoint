@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it } from "vitest";
+import type { GitHost } from "@/lib/githost";
 import { createFixtureHost, type FixtureHost } from "@/lib/githost/fixture";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseLedger, summarize } from "@/lib/ledger/ledger";
 import { answerRow, decide } from "./actions";
+import { loadChange } from "./load";
 
 const FIXTURE_DIR = join(process.cwd(), "fixtures", "repo");
 const LEDGER = "openspec/changes/add-user-auth/decisions.md";
@@ -18,15 +20,50 @@ beforeEach(() => {
   host = createFixtureHost({ dir: FIXTURE_DIR });
 });
 
+const LAPTOP_HEAD = "e".repeat(40);
+const DESIGN = "openspec/changes/add-user-auth/design.md";
+
+/**
+ * Wrap a host so a laptop commit that rewrote design.md can be simulated (the
+ * fixture adapter refuses to write that file): once pushed, the ref resolves to
+ * a head whose comparison lists design.md. Every writeFile is recorded.
+ */
+function withLaptopCommit(base: FixtureHost) {
+  let pushed = false;
+  const writes: string[] = [];
+  const wrapped: GitHost = {
+    ...base,
+    resolveRef: async (ref) => {
+      const r = await base.resolveRef(ref);
+      return pushed ? { ref: r.ref, headSha: LAPTOP_HEAD } : r;
+    },
+    writeFile: async (input) => {
+      writes.push(input.path);
+      return base.writeFile(input);
+    },
+    compare: async (b, h) =>
+      h === LAPTOP_HEAD ? { status: "ahead", files: [DESIGN], truncated: false } : base.compare(b, h),
+  };
+  return {
+    host: wrapped,
+    writes,
+    push() {
+      pushed = true;
+    },
+  };
+}
+
 describe("answerRow", () => {
   it("flips the row and leaves every other line byte-identical", async () => {
     const before = await host.readFile(LEDGER, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
     const result = await answerRow(host, {
       ref: "main",
       change: "add-user-auth",
       id: "D1",
       answer: "a session cookie",
       baseSha: before.sha,
+      headSha: pageHead,
       today: TODAY,
     });
     expect(result.ok).toBe(true);
@@ -46,6 +83,8 @@ describe("answerRow", () => {
     expect(result.summary).toMatchObject({ needsHuman: 0, agentResolved: 4, invalid: 0, blocking: false });
     expect(result.blockingReason).toBeNull();
     expect(result.headSha).toBe((await host.resolveRef("main")).headSha);
+    expect(result.headSha).not.toBe(pageHead);
+    expect(result.moved).toBe(false);
     expect(summarize(parseLedger(after.text)).blocking).toBe(false);
   });
 
@@ -170,9 +209,11 @@ describe("decide", () => {
     expect(written.request).toEqual(original.request);
     expect(written.senderNote).toBe(original.senderNote);
     expect(result.decision).toMatchObject({ state: "approved", headSha: headBefore, stale: false });
-    expect(result.headSha).toBe(headBefore);
-    // The write itself moved the head, so a fresh load would call it stale; that is honest.
-    expect((await host.resolveRef("main")).headSha).not.toBe(headBefore);
+    // The write moved the head, but only by checkpoint.json, so the approval reads fresh.
+    const headAfter = (await host.resolveRef("main")).headSha;
+    expect(headAfter).not.toBe(headBefore);
+    expect(result.decision).toMatchObject({ state: "approved", stale: false });
+    expect(result.headSha).toBe(headAfter);
   });
 
   it("send back writes the note even while the ledger blocks", async () => {
@@ -240,6 +281,7 @@ describe("decide", () => {
 
   it("a decision write conflict returns the reloaded file", async () => {
     const shown = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
     const laptop = JSON.parse(shown.text);
     laptop.decision = { state: "returned", note: "from the laptop", decidedAt: NOW, decidedBy: "laptop", headSha: "abc" };
     await host.writeFile({
@@ -255,13 +297,15 @@ describe("decide", () => {
       state: "returned",
       note: "from the phone",
       baseSha: shown.sha,
-      headSha: "x",
+      headSha: pageHead,
       now: NOW,
     });
     expect(result.ok).toBe(false);
     if (result.ok || result.reason !== "conflict") throw new Error("expected conflict");
     expect(result.message).toBe("The decision file changed on main; reloaded");
     expect(result.reloaded.decision).toMatchObject({ state: "returned", note: "from the laptop" });
+    // Only checkpoint.json moved, so the page head advances over it.
+    expect(result.reloaded.headSha).toBe((await host.resolveRef("main")).headSha);
     expect(JSON.parse((await host.readFile(CHECKPOINT, "main")).text).decision.note).toBe("from the laptop");
   });
 
@@ -275,10 +319,171 @@ describe("decide", () => {
       state: "returned",
       note: "n",
       baseSha: broken.sha,
-      headSha: "x",
+      headSha: (await host.resolveRef("main")).headSha,
       now: NOW,
     });
     expect(result).toMatchObject({ ok: false, reason: "checkpoint_unreadable" });
     expect((await host.readFile(CHECKPOINT, "main")).text).toBe("{broken");
+  });
+});
+
+describe("freshness against the page head", () => {
+  async function answeredD1(h: GitHost) {
+    const ledger = await h.readFile(LEDGER, "main");
+    const answered = await answerRow(h, {
+      ref: "main",
+      change: "add-user-auth",
+      id: "D1",
+      answer: "cookie",
+      baseSha: ledger.sha,
+      today: TODAY,
+    });
+    expect(answered.ok).toBe(true);
+  }
+
+  it("decide refuses when the branch moved past the page head by design.md, and writes nothing", async () => {
+    await answeredD1(host);
+    const laptop = withLaptopCommit(host);
+    const shown = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    laptop.push();
+    const result = await decide(laptop.host, {
+      ref: "main",
+      change: "add-user-auth",
+      state: "approved",
+      baseSha: shown.sha,
+      headSha: pageHead,
+      now: NOW,
+    });
+    expect(result).toEqual({
+      ok: false,
+      reason: "moved",
+      message: `The branch moved past ${pageHead.slice(0, 7)}; reload to read it`,
+    });
+    expect(laptop.writes).toEqual([]);
+  });
+
+  it("decide proceeds when the branch moved only by a ledger answer, and records the page head", async () => {
+    const shown = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    await answeredD1(host);
+    const spy = withLaptopCommit(host);
+    const result = await decide(spy.host, {
+      ref: "main",
+      change: "add-user-auth",
+      state: "approved",
+      baseSha: shown.sha,
+      headSha: pageHead,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(spy.writes).toEqual([CHECKPOINT]);
+    expect(result.checkpoint.decision?.headSha).toBe(pageHead);
+    expect(result.decision).toMatchObject({ headSha: pageHead, stale: false });
+  });
+
+  it("answerRow keeps the page head and says moved when design.md also changed; the next decide is refused", async () => {
+    const laptop = withLaptopCommit(host);
+    const ledger = await host.readFile(LEDGER, "main");
+    const checkpoint = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    laptop.push();
+    const answered = await answerRow(laptop.host, {
+      ref: "main",
+      change: "add-user-auth",
+      id: "D1",
+      answer: "cookie",
+      baseSha: ledger.sha,
+      headSha: pageHead,
+      today: TODAY,
+    });
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    expect(answered.headSha).toBe(pageHead);
+    expect(answered.moved).toBe(true);
+    expect(laptop.writes).toEqual([LEDGER]);
+
+    const decided = await decide(laptop.host, {
+      ref: "main",
+      change: "add-user-auth",
+      state: "approved",
+      baseSha: checkpoint.sha,
+      headSha: answered.headSha as string,
+      now: NOW,
+    });
+    expect(decided).toMatchObject({ ok: false, reason: "moved" });
+    expect(laptop.writes).toEqual([LEDGER]);
+  });
+
+  it("answerRow with no other commit advances the page head and is not moved", async () => {
+    const ledger = await host.readFile(LEDGER, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    const answered = await answerRow(host, {
+      ref: "main",
+      change: "add-user-auth",
+      id: "D1",
+      answer: "cookie",
+      baseSha: ledger.sha,
+      headSha: pageHead,
+      today: TODAY,
+    });
+    expect(answered.ok).toBe(true);
+    if (!answered.ok) return;
+    expect(answered.headSha).toBe((await host.resolveRef("main")).headSha);
+    expect(answered.moved).toBe(false);
+  });
+
+  it("answerRow without a page head returns headSha null and moved false", async () => {
+    const ledger = await host.readFile(LEDGER, "main");
+    const answered = await answerRow(host, {
+      ref: "main",
+      change: "add-user-auth",
+      id: "D1",
+      answer: "cookie",
+      baseSha: ledger.sha,
+      today: TODAY,
+    });
+    expect(answered).toMatchObject({ ok: true, headSha: null, moved: false });
+  });
+
+  it("approve, then reload: the approval is fresh and the header head is the approval commit", async () => {
+    await answeredD1(host);
+    const shown = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    const result = await decide(host, {
+      ref: "main",
+      change: "add-user-auth",
+      state: "approved",
+      baseSha: shown.sha,
+      headSha: pageHead,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const loaded = await loadChange(host, "main", "add-user-auth");
+    if (loaded.kind !== "change") throw new Error("expected change");
+    expect(loaded.change.decision).toMatchObject({ state: "approved", stale: false });
+    expect(loaded.change.headSha).toBe(result.commitSha);
+  });
+
+  it("an answer after an approval leaves the approval fresh", async () => {
+    await answeredD1(host);
+    const shown = await host.readFile(CHECKPOINT, "main");
+    const pageHead = (await host.resolveRef("main")).headSha;
+    const result = await decide(host, {
+      ref: "main",
+      change: "add-user-auth",
+      state: "approved",
+      baseSha: shown.sha,
+      headSha: pageHead,
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    const ledger = await host.readFile(LEDGER, "main");
+    await host.writeFile({ path: LEDGER, ref: "main", content: ledger.text + "\n", message: "answer", baseSha: ledger.sha });
+    const loaded = await loadChange(host, "main", "add-user-auth");
+    if (loaded.kind !== "change") throw new Error("expected change");
+    expect(loaded.change.decision).toMatchObject({ state: "approved", stale: false });
   });
 });

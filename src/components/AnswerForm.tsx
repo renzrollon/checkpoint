@@ -4,7 +4,7 @@ import { useId, useState, type FormEvent } from "react";
 import type { LedgerRow } from "@/lib/ledger/ledger";
 import { optionsFromQuestion } from "@/lib/ledger/options";
 import type { AnswerResult } from "@/lib/change/actions";
-import type { AnswerActionInput, Unauthenticated } from "@/app/changes/[name]/actions";
+import type { AnswerActionInput, RepoRefusal, Unauthenticated } from "@/app/changes/[name]/actions";
 
 /**
  * The answer form a `needs_human` row expands into (ledger-answering spec).
@@ -13,21 +13,27 @@ import type { AnswerActionInput, Unauthenticated } from "@/app/changes/[name]/ac
  * write itself goes through `submit` with the blob SHA the page showed.
  */
 
-export type AnswerSubmit = (input: AnswerActionInput) => Promise<AnswerResult | Unauthenticated>;
+export type AnswerSubmit = (input: AnswerActionInput) => Promise<AnswerResult | Unauthenticated | RepoRefusal>;
 
 export interface AnswerFormProps {
   row: LedgerRow;
+  /** Canonical repository the page was rendered for. */
+  repo: string;
+  /** Head SHA the page was rendered from (design D23). */
+  headSha: string | null;
   refName: string;
   change: string;
   /** Blob SHA of the decisions.md the owner is looking at. */
   baseSha: string | null;
+  /** True when design.md does not mention this row (design D10); warns, never blocks. */
+  unreferenced?: boolean;
   submit: AnswerSubmit;
-  onResult: (result: AnswerResult | Unauthenticated, answer: string) => void;
+  onResult: (result: AnswerResult | Unauthenticated | RepoRefusal, answer: string) => void;
 }
 
 export const ANSWER_REQUIRED = "An answer is required";
 
-export function AnswerForm({ row, refName, change, baseSha, submit, onResult }: AnswerFormProps) {
+export function AnswerForm({ row, repo, headSha, refName, change, baseSha, unreferenced = false, submit, onResult }: AnswerFormProps) {
   const id = useId();
   const options = optionsFromQuestion(row.question);
   const [answer, setAnswer] = useState("");
@@ -44,7 +50,7 @@ export function AnswerForm({ row, refName, change, baseSha, submit, onResult }: 
     setError(null);
     setBusy(true);
     try {
-      const result = await submit({ ref: refName, change, id: row.id, answer: trimmed, baseSha });
+      const result = await submit({ repo, headSha, ref: refName, change, id: row.id, answer: trimmed, baseSha });
       onResult(result, trimmed);
     } finally {
       setBusy(false);
@@ -97,6 +103,11 @@ export function AnswerForm({ row, refName, change, baseSha, submit, onResult }: 
       {error ? (
         <p id={`${id}-error`} role="alert" className="reason">
           {error}
+        </p>
+      ) : null}
+      {unreferenced ? (
+        <p className="reason" data-testid="reference-warning">
+          design.md does not mention {row.id}; after this answer the laptop reads the row as invalid until the design references it
         </p>
       ) : null}
       <button type="submit" className="btn btn-primary" disabled={busy}>

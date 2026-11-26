@@ -6,15 +6,40 @@
 //
 //   INTERLOCK_LIB_DIR=~/IdeaProjects/specflow/lib npm run gen:ledger-fixtures
 //
-// Defaults to the installed plugin cache. The port's tests compare against
+// Defaults to the highest-semver installed plugin under
+// ~/.claude/plugins/cache/interlock/interlock/ that holds lib/ledger.mjs. The port's tests compare against
 // the written files and never need Interlock present.
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const DEFAULT_LIB = join(homedir(), '.claude/plugins/cache/interlock/interlock/0.2.0/lib')
-const libDir = resolve((process.env.INTERLOCK_LIB_DIR || DEFAULT_LIB).replace(/^~(?=$|\/)/, homedir()))
+const PLUGIN_CACHE = join(homedir(), '.claude/plugins/cache/interlock/interlock')
+
+const semverKey = v => v.split('.').map(n => Number.parseInt(n, 10) || 0)
+const compareSemver = (a, b) => {
+  const [x, y] = [semverKey(a), semverKey(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+function newestInstalledLib() {
+  if (!existsSync(PLUGIN_CACHE)) return null
+  const versions = readdirSync(PLUGIN_CACHE)
+    .filter(v => /^\d+(\.\d+)*$/.test(v) && existsSync(join(PLUGIN_CACHE, v, 'lib', 'ledger.mjs')))
+    .sort(compareSemver)
+  return versions.length ? join(PLUGIN_CACHE, versions[versions.length - 1], 'lib') : null
+}
+
+const requested = process.env.INTERLOCK_LIB_DIR || newestInstalledLib()
+if (!requested) {
+  console.error(`No installed Interlock with lib/ledger.mjs under ${PLUGIN_CACHE}. Set INTERLOCK_LIB_DIR to Interlock's lib/ directory.`)
+  process.exit(1)
+}
+const libDir = resolve(requested.replace(/^~(?=$|\/)/, homedir()))
 const ledgerModule = join(libDir, 'ledger.mjs')
 if (!existsSync(ledgerModule)) {
   console.error(`No ledger.mjs under ${libDir}. Set INTERLOCK_LIB_DIR to Interlock's lib/ directory.`)

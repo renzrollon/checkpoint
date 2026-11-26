@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { redirectToPath } from "@/lib/auth/redirect";
 import { NO_KEY_MESSAGE, SESSION_COOKIE, configuredKey, verifySession } from "@/lib/auth/session";
 
 /**
@@ -53,10 +52,14 @@ export function proxy(request: NextRequest): NextResponse {
   if (isWriteLike(request)) {
     response = NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   } else {
-    // Relative, so the browser resolves it against the address it used rather
-    // than the address the server is bound to (design D1).
+    // Relative on the wire, so the browser resolves it against the address it
+    // used rather than the address the server is bound to (design D1). Next's
+    // proxy adapter parses `Location` with `new URL()` and no base, so a bare
+    // path crashes it with "Invalid URL"; it does, however, relativize any
+    // `Location` on the request's own host. Hand it the absolute URL on
+    // `request.nextUrl` and the client receives `/login?next=…`.
     const query = new URLSearchParams({ next: `${pathname}${search}` });
-    response = redirectToPath(`/login?${query}`, 307);
+    response = NextResponse.redirect(new URL(`/login?${query}`, request.nextUrl), 307);
   }
   response.headers.set("cache-control", "no-store");
   if (cookie !== undefined) response.cookies.delete(SESSION_COOKIE);

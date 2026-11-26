@@ -81,7 +81,7 @@ imports the real `ledger.mjs` from `INTERLOCK_LIB_DIR` and writes, for each
 hand-written `fixtures/ledger/<name>.md`, a `.parsed.json` and a
 `.serialized.md`. The unit tests compare the port against those golden files,
 and `fixtures/ledger/VERSION` records which Interlock produced them
-(currently 0.2.0). After an Interlock release, regenerate with:
+(currently 1.13.0). After an Interlock release, regenerate with:
 
 ```sh
 INTERLOCK_LIB_DIR=~/IdeaProjects/specflow/lib npm run gen:ledger-fixtures
@@ -119,25 +119,32 @@ preserves `request` and any unknown top-level field. `decision.headSha` is the
 branch head at the moment of decision; when the branch moves past it the app
 labels the decision stale and offers Approve again.
 
-As of Interlock 0.2.0, nothing in specflow reads this file. A search of its
-`lib/`, `bin/`, `skills/`, `workflows/`, and docs finds no reference to
-`checkpoint.json` or the `interlock.checkpoint` schema. The marker is
-therefore an audit record on the branch today, not a gate input. Approve on
-the phone does not by itself let `interlock ready` pass; the ledger being
-clear does. This is fail-closed by design: a marker the laptop side does not
-know about reads as "not approved".
+Interlock 1.13.0 does not read this file. The marker is an audit record on
+the branch today, not a gate input: Approve on the phone does not by itself
+let `interlock ready` pass; the ledger being clear does. This is fail-closed by
+design: a marker the laptop side does not know about reads as "not approved".
+The companion change in specflow adds the read, per
+`docs/interlock-contract.md`: `approved` and fresh is approved, `approved` and
+stale is not, `returned` blocks, and an absent or unparseable file means no
+phone decision.
 
-### 3. The push to the phone: assumed, not built
+### 3. The push to the phone: partly built, no link yet
 
-The design assumes a sender in specflow that writes a `request` block into
-`checkpoint.json` (head SHA, risk class and signals, task and ledger counts)
-and sends an ntfy push whose click URL is `/changes/<change>?ref=<branch>`.
-Checkpoint is only the click target; it never talks to ntfy.
+Interlock 1.13.0 already pushes a notification, but without a link to
+Checkpoint. The companion change adds the link (`/changes/<change>?ref=<branch>`),
+the publish step and the gates, per `docs/interlock-contract.md`. The publish
+step is opt-in, gated on a configured Checkpoint URL:
 
-That sender does not exist in specflow yet either. Checkpoint tolerates its
-absence: risk shows as `unobserved`, and every task and ledger count is
-computed from `tasks.md` and `decisions.md` on the ref, never taken from the
-sender. Until the push exists, the owner opens the app and reads the inbox.
+1. Commit only `openspec/changes/<change>/`. `/interlock:spec` does not commit;
+   the publish step does.
+2. Write `checkpoint.json` with `request.headSha` set to that commit, as a
+   second commit.
+3. Push the current branch.
+4. Send the ntfy push with `Click`.
+
+Checkpoint is only the click target; it never talks to ntfy. It tolerates a
+missing `request` block: risk shows as `unobserved`, and every task and ledger
+count is computed from `tasks.md` and `decisions.md` on the ref.
 
 ### The flow end to end
 
@@ -146,25 +153,26 @@ sequenceDiagram
     participant L as Laptop (Interlock)
     participant G as GitHub branch
     participant P as Phone (Checkpoint)
-    L->>G: /interlock:spec commits proposal, design, tasks, specs, decisions.md
-    Note over L: interlock ready blocks on the needs_human row
+    L->>L: /interlock:spec writes the artifacts, commits nothing
+    L->>G: publish step: commit openspec/changes/<change>/, commit checkpoint.json, push
+    L->>P: ntfy push with the Click link
     P->>G: read artifacts and ledger on the ref
     P->>G: commit decisions.md with the row answered (checkpoint(change): answer D1)
     P->>G: commit checkpoint.json with the decision (checkpoint(change): approve)
-    L->>G: pull
-    Note over L: interlock ready sees a clear ledger and passes
+    L->>G: git pull (nothing pulls automatically)
+    Note over L: interlock ready sees a clear ledger and a fresh approval
     L->>L: /interlock:ship
 ```
 
-Steps that exist today are the ledger read and write and the ready gate on
-the ledger. Steps still owned by specflow are the push before the phone read
-and any consumption of `checkpoint.json`.
+Today the ledger read and write and the ready gate on the ledger work. The
+publish step with its link, and the gates that read `checkpoint.json`, land
+with the companion change.
 
 ## Safety properties worth knowing
 
 - **Two files, one repository.** The adapter's path guard runs before any
   network call. The GitHub token is fine-grained, Contents read and write on
-  the one repository named in `CHECKPOINT_REPO`, and is never logged.
+  the repositories named in `CHECKPOINT_REPOS`, and is never logged.
 - **No stale writes.** Every write carries the blob SHA the owner was shown.
   GitHub rejects a stale SHA; the app reloads the file and says so. Nothing
   is retried.
@@ -177,14 +185,11 @@ and any consumption of `checkpoint.json`.
 
 ## What is still open
 
-- **Decision D1** in the archived change's ledger is still `needs_human`: how
-  the app itself is gated. The shared-key cookie is the implemented default.
-  Vercel Deployment Protection or Cloudflare Access would replace the access
-  gate files listed in the module map and nothing else.
-- **Interlock-side work**, in specflow: a sender that writes the `request`
-  block and pushes via ntfy, and a `ready` check that reads
-  `checkpoint.json` so that a phone approval is an explicit gate input rather
-  than only the ledger being clear.
+- **The companion change in specflow**: the publish step, the link in the
+  push, and the gates that read `checkpoint.json`, per
+  `docs/interlock-contract.md`.
+- **Escapement's `repo` parameter**, needed for it to address a repository
+  other than its default.
 
 ## Where the design came from
 

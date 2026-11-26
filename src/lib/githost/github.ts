@@ -1,6 +1,6 @@
 import { HostError } from "./errors";
 import { guardWritePath } from "./guard";
-import type { DirEntry, FileRead, GitHost, RefInfo, WriteInput, WriteResult } from "./types";
+import type { Comparison, DirEntry, FileRead, GitHost, RefInfo, WriteInput, WriteResult } from "./types";
 
 /**
  * GitHub contents API adapter (design D2, D10). One repository, one
@@ -16,6 +16,9 @@ export interface GitHubHostOptions {
   apiBase?: string;
   fetch?: typeof fetch;
 }
+
+/** The compare API lists at most 300 files. */
+const COMPARE_FILE_CAP = 300;
 
 type Json = Record<string, unknown>;
 
@@ -198,6 +201,25 @@ export function createGitHubHost(options: GitHubHostOptions): GitHost {
         });
       }
       return { sha, commitSha };
+    },
+
+    async compare(base: string, head: string): Promise<Comparison> {
+      const url = `${repoBase}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+      const { json } = await request("GET", url, {});
+      const out = (json ?? {}) as Json;
+      const status = out.status;
+      if (status !== "ahead" && status !== "identical" && status !== "behind" && status !== "diverged") {
+        throw new HostError({ kind: "upstream", message: "GitHub did not report a comparison status" });
+      }
+      const entries = Array.isArray(out.files) ? out.files : [];
+      const files = new Set<string>();
+      for (const f of entries) {
+        if (!f || typeof f !== "object") continue;
+        const { filename, previous_filename: previous } = f as Json;
+        if (typeof previous === "string" && previous) files.add(previous);
+        if (typeof filename === "string" && filename) files.add(filename);
+      }
+      return { status, files: [...files], truncated: entries.length >= COMPARE_FILE_CAP };
     },
   };
 }

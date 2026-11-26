@@ -64,6 +64,13 @@ describe("POST /api/session", () => {
     expect(verifySession(KEY, value)).toBe("valid");
   });
 
+  it("a push link survives sign-in", async () => {
+    const next = "/changes/add-user-auth?repo=renzrollon%2Finterlock&ref=carlrollon%2Fsunstar";
+    const res = await POST(post({ key: KEY, next }));
+    expect(res.status).toBe(303);
+    expectRelativeLocation(res, next);
+  });
+
   it("redirects to the inbox when next is absent or unsafe", async () => {
     expectRelativeLocation(await POST(post({ key: KEY })), "/");
     expectRelativeLocation(await POST(post({ key: KEY, next: "//evil.example" })), "/");

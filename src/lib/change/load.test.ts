@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HostError, type GitHost } from "@/lib/githost";
 import { createFixtureHost } from "@/lib/githost/fixture";
-import { blockingReasonFor, listChanges, loadChange } from "./load";
+import { ledgerViewFrom, advancePageHead, blockingReasonFor, listChanges, loadChange } from "./load";
 
 const FIXTURE_DIR = join(process.cwd(), "fixtures", "repo");
 const host = () => createFixtureHost({ dir: FIXTURE_DIR });
@@ -63,6 +63,9 @@ function failingHost(errors: { listDir: HostError; readFile: HostError }): GitHo
       throw errors.listDir;
     },
     writeFile: async () => {
+      throw errors.readFile;
+    },
+    compare: async () => {
       throw errors.readFile;
     },
   };
@@ -195,19 +198,68 @@ describe("loadChange", () => {
     expect(c.decision).toEqual({ state: "none" });
   });
 
-  it("shows the approved decision and stale risk after the head moves", async () => {
+  it("a checkpoint.json write keeps the decision and risk fresh", async () => {
     const h = host();
     const before = await loadChange(h, "main", "add-report-flag");
     if (before.kind !== "change") throw new Error("expected change");
     expect(before.change.decision).toMatchObject({ state: "approved", stale: false });
     expect(before.change.risk.state).toBe("observed");
-    // Any write moves the head, so the recorded risk and decision become stale.
-    const ledger = await h.readFile("openspec/changes/add-report-flag/decisions.md", "main");
-    await h.writeFile({ path: ledger.path, ref: "main", content: ledger.text + "\n", message: "m", baseSha: ledger.sha });
+    const file = await h.readFile("openspec/changes/add-report-flag/checkpoint.json", "main");
+    await h.writeFile({ path: file.path, ref: "main", content: file.text + "\n", message: "m", baseSha: file.sha });
     const after = await loadChange(h, "main", "add-report-flag");
+    if (after.kind !== "change") throw new Error("expected change");
+    expect(after.change.headSha).not.toBe(before.change.headSha);
+    expect(after.change.decision).toMatchObject({ state: "approved", stale: false });
+    expect(after.change.risk.state).toBe("observed");
+  });
+
+  it("a design.md write makes the decision and risk stale", async () => {
+    const h = host();
+    const before = await loadChange(h, "main", "add-report-flag");
+    if (before.kind !== "change") throw new Error("expected change");
+    // The fixture adapter refuses to write design.md, so the laptop commit is a
+    // comparison that reports it: the branch moved by the design file.
+    const moved: GitHost = {
+      ...h,
+      resolveRef: async (ref) => ({ ref: ref ?? "main", headSha: "d".repeat(40) }),
+      compare: async () => ({ status: "ahead", files: ["openspec/changes/add-report-flag/design.md"], truncated: false }),
+    };
+    const after = await loadChange(moved, "main", "add-report-flag");
     if (after.kind !== "change") throw new Error("expected change");
     expect(after.change.decision).toMatchObject({ state: "approved", stale: true });
     expect(after.change.risk.state).toBe("stale");
+  });
+
+  it("a stub host whose compare throws still loads the page, with the decision stale", async () => {
+    const h = host();
+    const broken: GitHost = {
+      ...h,
+      resolveRef: async (ref) => ({ ref: ref ?? "main", headSha: "d".repeat(40) }),
+      compare: async () => {
+        throw new HostError({ kind: "upstream", message: "git host unreachable" });
+      },
+    };
+    const result = await loadChange(broken, "main", "add-report-flag");
+    if (result.kind !== "change") throw new Error("expected change");
+    expect(result.change.decision).toMatchObject({ state: "approved", stale: true });
+    expect(result.change.risk.state).toBe("stale");
+  });
+
+  it("makes one compare per distinct recorded head that differs from the current head", async () => {
+    const h = host();
+    const calls: Array<[string, string]> = [];
+    const spied: GitHost = {
+      ...h,
+      resolveRef: async (ref) => ({ ref: ref ?? "main", headSha: "d".repeat(40) }),
+      compare: async (base, head) => {
+        calls.push([base, head]);
+        return { status: "ahead", files: [], truncated: false };
+      },
+    };
+    await loadChange(spied, "main", "add-report-flag");
+    expect(calls.length).toBeGreaterThan(0);
+    expect(new Set(calls.map(([b]) => b)).size).toBe(calls.length);
+    expect(calls.every(([, head]) => head === "d".repeat(40))).toBe(true);
   });
 
   it("marks missing artifacts per file and audits references against design.md", async () => {
@@ -299,6 +351,60 @@ describe("loadChange", () => {
   });
 });
 
+describe("listChanges freshness", () => {
+  it("the inbox makes no compare call", async () => {
+    const h = host();
+    let compares = 0;
+    const spied: GitHost = {
+      ...h,
+      compare: async (base, head) => {
+        compares += 1;
+        return h.compare(base, head);
+      },
+    };
+    const inbox = await listChanges(spied, "main");
+    expect(inbox.entries.find((e) => e.name === "add-report-flag")?.decision).toBe("approved");
+    expect(compares).toBe(0);
+  });
+});
+
+describe("advancePageHead", () => {
+  const PAGE = "a".repeat(40);
+  const NEW = "b".repeat(40);
+  const stubbed = (compare: GitHost["compare"]) => ({ ...host(), compare }) as GitHost;
+
+  it("equal heads make no compare call", async () => {
+    let calls = 0;
+    const h = stubbed(async () => {
+      calls += 1;
+      throw new Error("unreachable");
+    });
+    expect(await advancePageHead(h, "c", PAGE, PAGE)).toBe(PAGE);
+    expect(calls).toBe(0);
+  });
+
+  it("advances over this change's own Checkpoint files", async () => {
+    const h = stubbed(async () => ({
+      status: "ahead",
+      files: ["openspec/changes/c/decisions.md", "openspec/changes/c/checkpoint.json"],
+      truncated: false,
+    }));
+    expect(await advancePageHead(h, "c", PAGE, NEW)).toBe(NEW);
+  });
+
+  it("keeps the page head when anything else moved", async () => {
+    const h = stubbed(async () => ({ status: "ahead", files: ["openspec/changes/c/design.md"], truncated: false }));
+    expect(await advancePageHead(h, "c", PAGE, NEW)).toBe(PAGE);
+  });
+
+  it("keeps the page head when compare throws a host error", async () => {
+    const h = stubbed(async () => {
+      throw new HostError({ kind: "upstream", message: "down" });
+    });
+    expect(await advancePageHead(h, "c", PAGE, NEW)).toBe(PAGE);
+  });
+});
+
 describe("blockingReasonFor", () => {
   it("words every blocking state", () => {
     const base = { total: 0, agentResolved: 0, invalidCount: 0, exists: true, changeExists: true, blocking: true };
@@ -317,5 +423,33 @@ describe("blockingReasonFor", () => {
     expect(
       blockingReasonFor({ ...base, needsHuman: 0, invalid: 0, missing: false, unparseable: false, blocking: false }),
     ).toBeNull();
+  });
+});
+
+describe("ledgerViewFrom unreferenced", () => {
+  const ledger = {
+    file: "decisions.md",
+    sha: "s1",
+    missing: false,
+    text: [
+      "# Decisions — x",
+      "",
+      "| ID | Question | Class | Resolution | Evidence |",
+      "|---|---|---|---|---|",
+      "| D1 | Which one? | needs_human | | |",
+      "",
+    ].join("\n"),
+  } as Parameters<typeof ledgerViewFrom>[0];
+
+  it("lists a needs_human id that appears only inside a longer token (D10 is not D1)", () => {
+    expect(ledgerViewFrom(ledger, "See D10 for details").unreferenced).toEqual(["D1"]);
+  });
+
+  it("is empty when the design mentions the id", () => {
+    expect(ledgerViewFrom(ledger, "Decision D1 says").unreferenced).toEqual([]);
+  });
+
+  it("lists every needs_human id when design.md is missing", () => {
+    expect(ledgerViewFrom(ledger, null).unreferenced).toEqual(["D1"]);
   });
 });

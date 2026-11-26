@@ -692,3 +692,36 @@ pre,
   width: 100%;
   box-sizing: border-box;
 }
+
+/* --- inbox controls ------------------------------------------------------- */
+.inbox-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.inbox-controls form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.inbox-controls label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.inbox-controls nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.inbox-controls nav a[aria-current="page"] {
+  font-weight: 600;
+  color: var(--cp-mark);
+}

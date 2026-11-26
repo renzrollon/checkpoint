@@ -11,6 +11,11 @@ import {
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 const OLD = "89abcdef0123456789abcdef0123456789abcdef";
 
+const fresh = () => "fresh" as const;
+const stale = () => "stale" as const;
+/** A lookup that reads only `head` as fresh. */
+const freshOnly = (head: string) => (recorded: string) => (recorded === head ? ("fresh" as const) : ("stale" as const));
+
 const sample = {
   schema: CHECKPOINT_SCHEMA,
   change: "add-user-auth",
@@ -39,7 +44,7 @@ describe("readCheckpoint", () => {
   it("tolerates an unknown risk class", () => {
     const r = readCheckpoint(JSON.stringify({ ...sample, request: { ...sample.request, risk: { class: "purple" } } }));
     expect(r.checkpoint).not.toBeNull();
-    expect(riskView(r.checkpoint, HEAD)).toEqual({ state: "unobserved", raw: "purple" });
+    expect(riskView(r.checkpoint, HEAD, fresh)).toEqual({ state: "unobserved", raw: "purple" });
   });
 
   it("reports invalid JSON as a problem, not as absent", () => {
@@ -59,7 +64,7 @@ describe("readCheckpoint", () => {
 describe("riskView", () => {
   it("recorded risk is shown with its head", () => {
     const r = readCheckpoint(JSON.stringify(sample));
-    expect(riskView(r.checkpoint, HEAD)).toEqual({
+    expect(riskView(r.checkpoint, HEAD, fresh)).toEqual({
       state: "observed",
       class: "medium",
       headSha: HEAD,
@@ -67,9 +72,9 @@ describe("riskView", () => {
     });
   });
 
-  it("risk recorded for an older head is stale", () => {
+  it("risk recorded for an older head is stale when the lookup says so", () => {
     const r = readCheckpoint(JSON.stringify(sample));
-    expect(riskView(r.checkpoint, OLD)).toMatchObject({
+    expect(riskView(r.checkpoint, OLD, stale)).toMatchObject({
       state: "stale",
       class: "medium",
       headSha: HEAD,
@@ -77,12 +82,17 @@ describe("riskView", () => {
     });
   });
 
+  it("risk recorded for an older head stays observed when the lookup says fresh", () => {
+    const r = readCheckpoint(JSON.stringify(sample));
+    expect(riskView(r.checkpoint, OLD, fresh)).toMatchObject({ state: "observed", class: "medium", headSha: HEAD });
+  });
+
   it("no recorded risk is unobserved", () => {
-    expect(riskView(null, HEAD)).toEqual({ state: "unobserved" });
+    expect(riskView(null, HEAD, fresh)).toEqual({ state: "unobserved" });
     const noRequest = readCheckpoint(JSON.stringify({ schema: CHECKPOINT_SCHEMA, change: "x" }));
-    expect(riskView(noRequest.checkpoint, HEAD)).toEqual({ state: "unobserved" });
+    expect(riskView(noRequest.checkpoint, HEAD, fresh)).toEqual({ state: "unobserved" });
     const noRisk = readCheckpoint(JSON.stringify({ ...sample, request: { headSha: HEAD } }));
-    expect(riskView(noRisk.checkpoint, HEAD)).toEqual({ state: "unobserved" });
+    expect(riskView(noRisk.checkpoint, HEAD, fresh)).toEqual({ state: "unobserved" });
   });
 });
 
@@ -147,12 +157,14 @@ describe("withDecision", () => {
 
 describe("decisionView", () => {
   it("is none without a decision", () => {
-    expect(decisionView(readCheckpoint(JSON.stringify(sample)).checkpoint, HEAD)).toEqual({ state: "none" });
+    expect(decisionView(readCheckpoint(JSON.stringify(sample)).checkpoint, HEAD, fresh)).toEqual({ state: "none" });
   });
 
-  it("flags a decision stale when the head moved", () => {
+  it("flags a decision stale only when the lookup reads its recorded head as stale", () => {
     const cp = withDecision(null, "x", { state: "approved", decidedAt: "t", headSha: OLD });
-    expect(decisionView(cp, HEAD)).toMatchObject({ state: "approved", stale: true, headSha: OLD, currentHeadSha: HEAD });
-    expect(decisionView(cp, OLD)).toMatchObject({ state: "approved", stale: false });
+    expect(decisionView(cp, HEAD, stale)).toMatchObject({ state: "approved", stale: true, headSha: OLD, currentHeadSha: HEAD });
+    expect(decisionView(cp, HEAD, fresh)).toMatchObject({ state: "approved", stale: false, headSha: OLD, currentHeadSha: HEAD });
+    expect(decisionView(cp, HEAD, freshOnly(OLD))).toMatchObject({ state: "approved", stale: false });
+    expect(decisionView(cp, HEAD, freshOnly(HEAD))).toMatchObject({ state: "approved", stale: true });
   });
 });

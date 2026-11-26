@@ -6,9 +6,12 @@ import {
   riskView,
   type Checkpoint,
   type DecisionView,
+  type FreshnessLookup,
   type RiskView,
 } from "@/lib/checkpoint/checkpoint";
-import { parseLedger, summarize, type LedgerRow, type LedgerSummary, type ParsedLedger } from "@/lib/ledger/ledger";
+import { classifyFreshness } from "@/lib/checkpoint/freshness";
+import type { Comparison } from "@/lib/githost/types";
+import { parseLedger, referenceResolves, summarize, type LedgerRow, type LedgerSummary, type ParsedLedger } from "@/lib/ledger/ledger";
 import { parseTasks, type ParsedTasks } from "@/lib/tasks/tasks";
 
 /**
@@ -49,6 +52,8 @@ export interface LedgerView {
   statusText: string;
   /** The reason Approve is refused, or null when the ledger is clear. */
   blockingReason: string | null;
+  /** Ids of `needs_human` rows design.md does not mention (all of them when design.md is missing). */
+  unreferenced: string[];
 }
 
 export interface CheckpointView {
@@ -121,7 +126,58 @@ export function ledgerViewFrom(ledger: Artifact, designText: string | null): Led
     status,
     statusText,
     blockingReason: blockingReasonFor(summary),
+    unreferenced: (parsed?.rows ?? [])
+      .filter((row) => row.class === "needs_human" && !referenceResolves(row.id, designText))
+      .map((row) => row.id),
   };
+}
+
+/** compare(base, head), with any host failure read as an absent comparison (design D18). */
+export async function compareOrNull(host: GitHost, base: string, head: string): Promise<Comparison | null> {
+  try {
+    return await host.compare(base, head);
+  } catch (e) {
+    if (isHostError(e)) return null;
+    throw e;
+  }
+}
+
+/**
+ * The freshness lookup for a checkpoint read at `currentHead` (design D18):
+ * one `compare` per distinct recorded head that differs from the current
+ * one, run concurrently. A failed compare reads as stale; freshness never
+ * fails a page.
+ */
+export async function freshnessFor(
+  host: GitHost,
+  checkpoint: Checkpoint | null,
+  currentHead: string,
+  change: string,
+): Promise<FreshnessLookup> {
+  const recorded = [checkpoint?.decision?.headSha, checkpoint?.request?.headSha].filter(
+    (h): h is string => typeof h === "string" && h !== "" && h !== currentHead,
+  );
+  const distinct = [...new Set(recorded)];
+  const comparisons = new Map<string, Comparison | null>(
+    await Promise.all(
+      distinct.map(async (h): Promise<[string, Comparison | null]> => [h, await compareOrNull(host, h, currentHead)]),
+    ),
+  );
+  return (recordedHead) =>
+    classifyFreshness({ recordedHead, currentHead, comparison: comparisons.get(recordedHead), change });
+}
+
+/**
+ * The head a page may adopt after a write (design D23): `newHead` when the
+ * page head is `newHead` or only Checkpoint's own files separate them,
+ * otherwise the page head, so a commit the owner never read is not swept in.
+ */
+export async function advancePageHead(host: GitHost, change: string, pageHead: string, newHead: string): Promise<string> {
+  if (pageHead === newHead) return newHead;
+  const comparison = await compareOrNull(host, pageHead, newHead);
+  return classifyFreshness({ recordedHead: pageHead, currentHead: newHead, comparison, change }) === "fresh"
+    ? newHead
+    : pageHead;
 }
 
 export function checkpointViewFrom(file: Artifact): CheckpointView {
@@ -202,12 +258,12 @@ export async function listChanges(host: GitHost, ref?: string | null): Promise<I
   const rows = await Promise.all(
     names.map(async (name): Promise<InboxEntry> => {
       const core = await readCore(host, info.ref, name);
-      const decision = decisionView(core.checkpoint.value, info.headSha);
       return {
         name,
         ledger: { status: core.ledger.status, statusText: core.ledger.statusText, summary: core.ledger.summary },
         tasks: { done: core.tasks.done, total: core.tasks.total, waves: core.tasks.waves },
-        decision: decision.state,
+        // The state alone, straight from the file: no comparison, so the inbox costs no extra request.
+        decision: core.checkpoint.value?.decision?.state ?? "none",
         blocking: core.ledger.summary.blocking,
       };
     }),
@@ -251,6 +307,8 @@ export async function loadChange(host: GitHost, ref: string | null | undefined, 
   const core = coreRead.value;
   const specs = specsRead.value;
 
+  const lookup = await freshnessFor(host, core.checkpoint.value, info.headSha, name);
+
   return {
     kind: "change",
     change: {
@@ -262,8 +320,8 @@ export async function loadChange(host: GitHost, ref: string | null | undefined, 
       tasks: core.tasks,
       ledger: core.ledger,
       checkpoint: core.checkpoint,
-      risk: riskView(core.checkpoint.value, info.headSha),
-      decision: decisionView(core.checkpoint.value, info.headSha),
+      risk: riskView(core.checkpoint.value, info.headSha, lookup),
+      decision: decisionView(core.checkpoint.value, info.headSha, lookup),
     },
   };
 }

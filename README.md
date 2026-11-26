@@ -1,6 +1,6 @@
 # Checkpoint
 
-> **Status:** spike, in progress. The design below is settled; the integration lands with [Interlock](https://github.com/renzrollon/interlock).
+> **Status:** ready to deploy. The Checkpoint side is complete; the Interlock side (the push link and publish step) is specified in `docs/interlock-contract.md`.
 
 Checkpoint is the phone-sized inbox for the one decision an unattended
 Interlock run cannot make. `/interlock:spec` stops at a human read, and
@@ -12,7 +12,7 @@ for a 375 px screen, lets the owner answer the row, and records **Approve** or
 
 The phone never talks to the laptop. The git host is the message bus: every
 read is a read on a ref, every write is a commit, and there is no database.
-The app holds one repository token and nothing else, and it writes exactly two
+The app holds one repository token and nothing else (one deployment serves every repository in its allowlist), and it writes exactly two
 files, `openspec/changes/<change>/decisions.md` and
 `openspec/changes/<change>/checkpoint.json`.
 
@@ -21,29 +21,41 @@ denominator. Anything the sender did not record is shown as `unobserved`, never
 guessed.
 
 For the longer story, what problem this solves, how it meets Interlock's
-ledger and `checkpoint.json` contracts, and which parts of that integration
-still have to land in specflow, see `docs/how-checkpoint-works.md`.
+ledger and `checkpoint.json` contracts, see `docs/how-checkpoint-works.md`. The
+wire contract both sides build against is `docs/interlock-contract.md`.
 
 ## Environment variables
 
 | Variable | Required | Meaning |
 |---|---|---|
-| `CHECKPOINT_ACCESS_KEY` | for any access | Shared access key exchanged at `/login` for a 30-day httpOnly session cookie. When unset, every gated route answers `503 Checkpoint has no access key configured`. The app fails closed. |
-| `CHECKPOINT_GIT_HOST` | yes | `github` in production, `fixture` for local development and tests. Defaults to `github`. |
-| `CHECKPOINT_REPO` | with `github` | `owner/name` of the one repository the app reads and writes. |
-| `CHECKPOINT_GITHUB_TOKEN` | with `github` | Fine-grained personal access token for that repository (scope below). Never logged, never included in an error message. |
-| `CHECKPOINT_FIXTURE_DIR` | with `fixture` | Directory served as the repository. Defaults to `fixtures/repo`. |
+| `CHECKPOINT_ACCESS_KEY` | for any access | Shared access key exchanged at `/login` for a 30-day httpOnly session cookie. When unset, every gated route answers `503 Checkpoint has no access key configured`. The app fails closed. Generate it with `openssl rand -base64 32` (below). |
+| `CHECKPOINT_GIT_HOST` | yes | `github` in production, `fixture` for local development and tests. Defaults to `github`. A production build (`NODE_ENV=production`) refuses `fixture`. |
+| `CHECKPOINT_REPOS` | with `github` | Comma-separated `owner/name` allowlist of the repositories the app may read and write, for example `renzrollon/interlock,renzrollon/checkpoint`. The first entry is the default. Duplicates (case-insensitive) and malformed entries are refused. |
+| `CHECKPOINT_REPO` | fallback | The older single-repository variable, read as a one-entry `CHECKPOINT_REPOS`. Setting both is a configuration error. |
+| `CHECKPOINT_GITHUB_TOKEN` | with `github` | Fine-grained personal access token covering every listed repository (scope below). Never logged, never included in an error message. |
+| `CHECKPOINT_FIXTURE_DIR` | with `fixture` | Directory served as the repository. Defaults to `fixtures/repo`. The fixture adapter serves exactly one repository, `fixture/repo` unless named. |
 | `CHECKPOINT_DEV_ORIGINS` | no, development only | Comma-separated extra origins `npm run dev` may serve `_next/*` to, so a phone on the LAN can load the app ("Testing from your phone" below). `127.0.0.1` is always allowed. Read once at dev-server startup; `next start` and Vercel ignore it. |
 
 Copy `.env.example` to `.env.local` and fill it in. Validation runs on first
-use and stops the request naming the missing variable.
+use. A page that cannot start says "Checkpoint is not configured" and names the
+variables at fault, never their values.
+
+### Generating the access key
+
+```sh
+openssl rand -base64 32
+```
+
+The login is not rate limited, so brute-force resistance rests on the key's
+entropy. Use a random 32-byte key, not a phrase.
 
 ## GitHub token scope
 
-Create a fine-grained personal access token at
+Create **one** fine-grained personal access token at
 <https://github.com/settings/personal-access-tokens>:
 
-- **Repository access:** only the repository named in `CHECKPOINT_REPO`.
+- **Resource owner:** the account that owns the repositories (for example `renzrollon`).
+- **Repository access:** select every repository listed in `CHECKPOINT_REPOS`, and no others.
 - **Permissions:** Contents, **read and write**. Nothing else.
 
 Read access is enough to render a change. Write access is what commits the
@@ -66,19 +78,20 @@ lists the two sample changes under `fixtures/repo/openspec/changes/`.
 ledger and an approved `checkpoint.json`. Writes go to an in-memory overlay,
 so the files on disk never change; restart the server to reset them.
 
-Against a real repository:
+Against real repositories:
 
 ```sh
 CHECKPOINT_GIT_HOST=github \
-CHECKPOINT_REPO=owner/name \
+CHECKPOINT_REPOS=owner/one,owner/two \
 CHECKPOINT_GITHUB_TOKEN=github_pat_... \
 CHECKPOINT_ACCESS_KEY=... \
 npm run dev
 ```
 
-Every page takes a `?ref=<branch>` query parameter and defaults to the
-repository's default branch. The header always shows the ref and the short
-head SHA the page was rendered from.
+Every page takes `?repo=<owner/name>` and `?ref=<branch>`. A missing `repo` is
+the first configured repository and a missing `ref` is its default branch; a
+`repo` outside the allowlist is refused by name, never replaced by the default.
+The header always shows the ref and the short head SHA the page was rendered from.
 
 ### Scripts
 
@@ -93,7 +106,46 @@ head SHA the page was rendered from.
 | `npm run test:e2e` | Playwright smoke on the fixture adapter at 375 px |
 | `npm run gen:ledger-fixtures` | Regenerate the ledger golden files (below) |
 
-## Testing from your phone
+## Deploying to Vercel
+
+Checkpoint is a plain Next.js app with no Vercel-specific code. Nothing here is
+done for you; follow it once.
+
+1. **Create the Vercel project** from `renzrollon/checkpoint`, branch `main`.
+2. **Mint one fine-grained token**, owned by the account that owns the
+   repositories, selecting every repository in `CHECKPOINT_REPOS`, with
+   Contents read and write ("GitHub token scope" above).
+3. **Generate the access key** with `openssl rand -base64 32`.
+4. **Set the environment** for Production: `CHECKPOINT_ACCESS_KEY`,
+   `CHECKPOINT_GITHUB_TOKEN`, `CHECKPOINT_REPOS` and `CHECKPOINT_GIT_HOST=github`.
+5. **Keep Deployment Protection on Standard.** That covers previews and
+   generated URLs. The production domain is gated by the access key alone, and
+   push links point at the production domain.
+6. **Deploy and add to the home screen.** The app ships a web manifest and icons
+   and needs no service worker. On iOS the home-screen app and Safari keep
+   separate cookies, so a push tap may ask for the key once; the link survives
+   sign-in.
+7. **Hand the production URL to the laptop:** Interlock's Checkpoint URL option
+   (from the companion change in specflow) and `ESCAPEMENT_CHECKPOINT_URL`.
+8. **Run the first phone test** below.
+
+Rollback is deleting the deployment. Nothing persists outside the target
+repositories' branches. Reverting to a single repository only needs
+`CHECKPOINT_REPO`.
+
+### First test from your phone
+
+On a fresh change pushed to a `renzrollon/*` branch:
+
+- [ ] Open `<production URL>/changes/<change>?repo=<owner/name>&ref=<branch>` on the phone. Sign in with the key; you land on that change, not the inbox, and the header names the branch.
+- [ ] The change renders: proposal, design, tasks, specs, ledger and the risk line.
+- [ ] Answer a `needs_human` row. The ledger count drops and the branch has a `checkpoint(<change>): answer <id>` commit.
+- [ ] Approve. The approval shows without a stale label, including after a reload.
+- [ ] Tap "Checkpoint" in the header. The inbox opens on the same repository and branch.
+- [ ] Type a different branch in the Branch field and open it.
+- [ ] On the laptop, `git pull` and confirm `checkpoint.json` carries the decision.
+
+## Testing from your phone before deploying
 
 Checkpoint is built for a 375 px screen, so it is worth opening on a real one
 before deploying. The redirects it issues carry a relative `Location`, so
@@ -118,15 +170,14 @@ origin but `127.0.0.1`. It is read once at startup, so **restart `npm run dev`
 after changing it**.
 
 **Over an https tunnel, against the production build.** No origin allowlist is
-involved; the tunnel terminates https and forwards to `localhost:3000`:
+involved; the tunnel terminates https and forwards to `localhost:3000`. A
+production build refuses `CHECKPOINT_GIT_HOST=fixture`, so this path needs the
+GitHub variables (`CHECKPOINT_REPOS`, `CHECKPOINT_GITHUB_TOKEN`):
 
 ```sh
 npm run build && npm start
 # then point any https tunnel (cloudflared, ngrok, tailscale funnel) at localhost:3000
 ```
-
-**Deployed.** See "Deploying to Vercel" below; the same phone flow applies with
-none of this setup.
 
 > **Why the LAN path uses the development server.** In production, and on any
 > request that arrived over https, the session cookie carries `Secure`, so a
@@ -135,59 +186,13 @@ none of this setup.
 > the login page. The development server omits `Secure` over plain http, which
 > is what lets the phone hold the session on a LAN.
 
-## Deploying to Vercel
-
-Checkpoint is a plain Next.js app with no Vercel-specific code.
-
-1. Create a Vercel project from this repository.
-2. Set the environment variables `CHECKPOINT_ACCESS_KEY`,
-   `CHECKPOINT_GITHUB_TOKEN`, `CHECKPOINT_REPO` and
-   `CHECKPOINT_GIT_HOST=github` in the project settings, for the Production
-   environment at least.
-3. Deploy. Add the deployed URL to the home screen on the phone; the app
-   ships a web manifest and icons and needs no service worker.
-
-Rollback is deleting the deployment. Nothing persists outside the target
-repository's branch.
-
 ## The `checkpoint.json` contract
 
-The sender (specflow's push) is assumed to write a `request` block before it
-pushes. The reader validates it with a tolerant schema, shows risk as
-`unobserved` when it is absent, and always computes task and ledger counts
-itself from `tasks.md` and `decisions.md` on the ref. The reader writes
-`decision`, replacing any previous decision, and preserves `request` and any
-unknown top-level field.
-
-```json
-{
-  "schema": "interlock.checkpoint/1",
-  "change": "add-user-auth",
-  "request": {
-    "kind": "checkpoint",
-    "requestedAt": "2026-09-05T03:10:00Z",
-    "headSha": "0123456789abcdef0123456789abcdef01234567",
-    "risk": { "class": "medium", "signals": ["shared-value-transform"] },
-    "tasks": { "total": 12, "waves": 3 },
-    "ledger": { "needsHuman": 1, "agentResolved": 8, "invalid": 0 }
-  },
-  "decision": {
-    "state": "approved",
-    "note": "",
-    "decidedAt": "2026-09-05T04:00:00Z",
-    "decidedBy": "checkpoint",
-    "headSha": "0123456789abcdef0123456789abcdef01234567"
-  }
-}
-```
-
-`request` is optional and opaque beyond `headSha` and `risk.class`.
-`risk.class` is displayed only if it is one of `low|medium|high|critical`;
-otherwise it is shown as `unobserved` with the raw value in a tooltip. When
-`request.headSha` differs from the ref's current head, the risk is labelled
-stale. `decision.headSha` is the ref's head at the moment of decision; when
-the branch has moved past it the decision is labelled stale and Approve is
-offered again.
+The wire contract, `interlock.checkpoint/1`, is written in
+[`docs/interlock-contract.md`](docs/interlock-contract.md): the click URL, who
+owns which fields, the `request` block, the freshness rule, what a laptop gate
+reads, and the publish sequence. In short, the sender owns `request`, Checkpoint
+owns `decision`, and both preserve unknown fields.
 
 Approve is refused, in the UI and on the server, while the ledger has a
 `needs_human` row, an invalid row, is missing, or is unparseable. That mirrors
@@ -205,27 +210,39 @@ answer writes the evidence cell `human decision <YYYY-MM-DD> via Checkpoint`
 `lib/ledger.mjs`. Parity is pinned by golden files under `fixtures/ledger/`:
 for each hand-written `<name>.md` there is a `<name>.parsed.json` and a
 `<name>.serialized.md` produced by the real module, and
-`fixtures/ledger/VERSION` records the Interlock version that produced them.
-The tests compare the port against those files and never need Interlock
-installed.
+`fixtures/ledger/VERSION` records the Interlock version that produced them
+(currently 1.13.0). The tests compare the port against those files and never
+need Interlock installed.
 
 To regenerate after an Interlock release:
+
+```sh
+npm run gen:ledger-fixtures
+```
+
+`INTERLOCK_LIB_DIR` wins when set. Otherwise the script uses the highest-semver
+directory under `~/.claude/plugins/cache/interlock/interlock/` that contains
+`lib/ledger.mjs`, and exits 1 with a message when there is none. If the newest
+installed plugin is older than the release you want to record, point it at the
+sources:
 
 ```sh
 INTERLOCK_LIB_DIR=~/IdeaProjects/specflow/lib npm run gen:ledger-fixtures
 ```
 
-`INTERLOCK_LIB_DIR` defaults to the installed plugin cache,
-`~/.claude/plugins/cache/interlock/interlock/0.2.0/lib`. Commit the regenerated
-files together with `VERSION`.
+Commit the regenerated files together with `VERSION`. Any golden-file diff other
+than `VERSION` is a port defect to fix, not to keep.
 
-## Open decision D1: how the app itself is gated
+## Access gate
 
-`openspec/changes/build-checkpoint-reader/decisions.md` carries one
-`needs_human` row. The implemented default is a shared access key exchanged
-for an httpOnly, Secure, SameSite=Lax cookie verified by `src/proxy.ts` on
-every route. The alternatives the owner may prefer are Vercel Deployment
-Protection (no app code, ties the app to Vercel) and Cloudflare Access
-(identity-based, one more service). Only `src/lib/auth/*`, `src/proxy.ts`,
-`src/app/api/session/` and the login page would be removed if the answer
-changes; nothing else in the app depends on it.
+The app is gated by a shared access key exchanged for an httpOnly, Secure,
+SameSite=Lax cookie (a 30-day HMAC, compared in constant time) and verified by
+`src/proxy.ts` on every route. The choice is recorded as decision D2 of the
+`use-checkpoint-from-phone` change: the key is host-agnostic, and deep links
+survive sign-in. Vercel Deployment Protection stays on Standard as a second
+layer for previews, not as a replacement.
+
+The gate is not removable as a single unit. Besides `src/lib/auth/*`,
+`src/proxy.ts`, `src/app/api/session/` and the login page, `src/app/layout.tsx`
+and the server actions also import `@/lib/auth/session`. Changing the gate means
+touching those too.

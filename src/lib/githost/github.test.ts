@@ -223,4 +223,87 @@ describe("GitHub adapter", () => {
   it("refuses a malformed repo name at construction", () => {
     expect(() => createGitHubHost({ repo: "nope", token: "t" })).toThrow(/owner\/name/);
   });
+
+  describe("compare", () => {
+    const CP = "openspec/changes/add-user-auth/checkpoint.json";
+
+    it("maps an ahead comparison that touched one path", async () => {
+      const { host, calls } = makeHost(() =>
+        jsonResponse(200, { status: "ahead", files: [{ filename: CP, status: "modified" }] }),
+      );
+      expect(await host.compare("aaa", "bbb")).toEqual({
+        status: "ahead",
+        files: [CP],
+        truncated: false,
+      });
+      expect(calls[0].url).toBe(`https://api.github.com/repos/${REPO}/compare/aaa...bbb`);
+    });
+
+    it("compares a head with itself as identical with no paths", async () => {
+      const { host } = makeHost(() => jsonResponse(200, { status: "identical", files: [] }));
+      expect(await host.compare("aaa", "aaa")).toEqual({
+        status: "identical",
+        files: [],
+        truncated: false,
+      });
+    });
+
+    it("passes behind and diverged through", async () => {
+      for (const status of ["behind", "diverged"] as const) {
+        const { host } = makeHost(() => jsonResponse(200, { status, files: [] }));
+        expect((await host.compare("a", "b")).status).toBe(status);
+      }
+    });
+
+    it("an unknown commit is not_found", async () => {
+      const { host } = makeHost(() => jsonResponse(404, { message: "Not Found" }));
+      await expectHostError(host.compare("nope", "bbb"), "not_found");
+    });
+
+    it("a rename reports both paths", async () => {
+      const { host } = makeHost(() =>
+        jsonResponse(200, {
+          status: "ahead",
+          files: [{ filename: "docs/b.md", previous_filename: "docs/a.md", status: "renamed" }],
+        }),
+      );
+      const out = await host.compare("a", "b");
+      expect(out.files).toEqual(expect.arrayContaining(["docs/a.md", "docs/b.md"]));
+      expect(out.files).toHaveLength(2);
+    });
+
+    it("a 300-file list is truncated, 299 is not", async () => {
+      const files = (n: number) =>
+        Array.from({ length: n }, (_, i) => ({ filename: `f${i}.md`, status: "added" }));
+      const full = makeHost(() => jsonResponse(200, { status: "ahead", files: files(300) }));
+      expect((await full.host.compare("a", "b")).truncated).toBe(true);
+      const under = makeHost(() => jsonResponse(200, { status: "ahead", files: files(299) }));
+      expect((await under.host.compare("a", "b")).truncated).toBe(false);
+    });
+
+    it("encodes each SHA in the path", async () => {
+      const { host, calls } = makeHost(() => jsonResponse(200, { status: "identical", files: [] }));
+      await host.compare("a/b", "c d");
+      expect(calls[0].url).toBe(`https://api.github.com/repos/${REPO}/compare/a%2Fb...c%20d`);
+    });
+
+    it("an unrecognised status is upstream", async () => {
+      const { host } = makeHost(() => jsonResponse(200, { status: "weird", files: [] }));
+      await expectHostError(host.compare("a", "b"), "upstream");
+    });
+
+    it("two adapters each request their own repository", async () => {
+      const urls: string[] = [];
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return jsonResponse(200, { status: "identical", files: [] });
+      }) as unknown as typeof fetch;
+      const one = createGitHubHost({ repo: "renzrollon/interlock", token: TOKEN, fetch: fetchMock });
+      const two = createGitHubHost({ repo: "renzrollon/checkpoint", token: TOKEN, fetch: fetchMock });
+      await one.compare("a", "b");
+      await two.compare("a", "b");
+      expect(urls[0]).toContain("/repos/renzrollon/interlock/compare/");
+      expect(urls[1]).toContain("/repos/renzrollon/checkpoint/compare/");
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { locationHref } from "@/lib/repo";
 import type { InboxEntry } from "@/lib/change/load";
 
 /**
@@ -6,8 +7,8 @@ import type { InboxEntry } from "@/lib/change/load";
  * card; the 2 px leading rule on a blocking card is a redundant mark beside
  * the status that already says so.
  */
-export function ChangeCard({ entry, refName }: { entry: InboxEntry; refName: string }) {
-  const href = `/changes/${encodeURIComponent(entry.name)}?ref=${encodeURIComponent(refName)}`;
+export function ChangeCard({ entry, repo, refName }: { entry: InboxEntry; repo: string; refName: string }) {
+  const href = locationHref(`/changes/${encodeURIComponent(entry.name)}`, { repo, ref: refName });
   return (
     <li>
       <Link href={href} className={`card${entry.blocking ? " card-blocking" : ""}`}>
